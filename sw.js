@@ -1,4 +1,4 @@
-const APP_CACHE = 'zone-app-v3';
+const APP_CACHE = 'zone-app-v4';
 const VOSK_CACHE = 'vosk-cache-v1';
 
 // I file base del nostro Guscio
@@ -38,26 +38,18 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     const requestUrl = event.request.url;
 
-    // SE STIAMO SCARICANDO RISORSE VOSK (Il Motore JS o il Modello ZIP)
-    if (requestUrl.includes('vosk.js') || requestUrl.includes('vosk-model-small-it') || requestUrl.endsWith('.zip') || requestUrl.endsWith('.tar.gz')) {
+    // SE STIAMO CERCANDO RISORSE VOSK (Il Motore JS o il Modello ZIP)
+    if (requestUrl.includes('vosk.js') || requestUrl.includes('vosk-model-small-it') || requestUrl.endsWith('.zip')) {
         event.respondWith(
-            caches.open(VOSK_CACHE).then((cache) => {
-                return cache.match(event.request).then((response) => {
-                    // 1. Se la risorsa è già nella memoria del telefono, usala immediatamente!
-                    if (response) {
-                        console.log('[SW] Risorsa Vosk caricata dalla CACHE OFFLINE:', requestUrl);
-                        return response;
-                    }
-                    // 2. Altrimenti, scaricala da internet e poi salvala per sempre nella cache
-                    console.log('[SW] Download risorsa Vosk in corso... (solo la prima volta):', requestUrl);
-                    return fetch(event.request).then((networkResponse) => {
-                        cache.put(event.request, networkResponse.clone());
-                        return networkResponse;
-                    }).catch(err => {
-                        console.error('[SW] Impossibile scaricare la risorsa Vosk. Sei offline e non è in cache.', err);
-                        throw err;
-                    });
-                });
+            caches.match(event.request).then((response) => {
+                // Se c'è in cache (inserito dalla barra di installazione), restituiscilo!
+                if (response) {
+                    console.log('[SW] Risorsa Vosk caricata DALLA CACHE:', requestUrl);
+                    return response;
+                }
+                // Altrimenti lascialo passare su internet normale
+                console.log('[SW] Risorsa Vosk non in cache, procedo con rete:', requestUrl);
+                return fetch(event.request);
             })
         );
         return;
@@ -67,9 +59,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
         caches.match(event.request).then((response) => {
             return response || fetch(event.request).then((fetchRes) => {
-                // Aggiorna dinamicamente la cache base
                 return caches.open(APP_CACHE).then((cache) => {
-                    // Non cachiamo le chiamate API di Google Script (POST, ecc.)
                     if (event.request.method === 'GET' && requestUrl.startsWith('http')) {
                         cache.put(event.request, fetchRes.clone());
                     }
@@ -77,7 +67,6 @@ self.addEventListener('fetch', (event) => {
                 });
             });
         }).catch(() => {
-            // Fallback se manca rete e il file non è in cache
             return new Response('Sei offline e la risorsa non è in cache.');
         })
     );
