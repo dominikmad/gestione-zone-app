@@ -1,6 +1,6 @@
 {
-  "name": "Casellario Smart",
-  "short_name": "Casellario Smart",
+  "name": "Casellario 2.0",
+  "short_name": "Casellario 2.0",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f0f2f5",
