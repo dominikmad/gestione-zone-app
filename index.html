@@ -27,12 +27,32 @@
             box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; 
             width: 85%; max-width: 350px; border: 2px solid white;
             overflow: hidden; /* Mantiene l'effetto smussato sulla barra interna */
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        /* Classe per quando il contenitore diventa cliccabile */
+        #progress-container.ready-to-install {
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.8);
+            transform: translateX(-50%) scale(1.02);
+        }
+        #progress-container.ready-to-install:active {
+            transform: translateX(-50%) scale(0.98);
         }
         
         #progress-bar-fill {
             position: absolute; top: 0; left: 0; height: 100%; width: 0%; 
             background: #3b82f6; /* Azzurro (colore progresso) */
-            transition: width 0.2s ease-out; z-index: 1;
+            transition: width 0.2s ease-out, background-color 0.3s; z-index: 1;
+        }
+
+        /* Animazione pulsante per l'installazione nativa in corso */
+        .pulse-install {
+            animation: install-pulse 1.5s infinite alternate;
+        }
+        @keyframes install-pulse {
+            0% { opacity: 0.7; }
+            100% { opacity: 1; }
         }
         
         #progress-content {
@@ -98,7 +118,6 @@
     <script>
         // COSTANTI DEI FILE DA SCARICARE FORZATAMENTE
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
-        // ORA PUNTIAMO AL FILE LOCALE SU GITHUB! Addio blocchi CORS.
         const MODEL_URL = './vosk-model-small-it-0.22.zip';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
 
@@ -124,77 +143,103 @@
             installBanner.style.display = 'flex';
         });
 
-        // La Magia della Barra di Progresso Unificata
+        // FASE 1: Click su "Installa l'App" (Avvia il download)
         installBanner.addEventListener('click', async () => {
             installBanner.style.display = 'none';
             progressContainer.style.display = 'block';
+            progressContainer.classList.remove('ready-to-install'); // Assicuriamoci che non sia cliccabile
+            progressContainer.onclick = null; // Rimuovi vecchi listener
+            progressBarFill.classList.remove('pulse-install');
+            progressBarFill.style.background = '#3b82f6';
 
             try {
                 progressContent.textContent = "Verifica requisiti offline...";
                 progressBarFill.style.width = '10%';
 
-                // 1. Scarichiamo il Modello Italiano tramite Fetch Sicuro (Ora è Locale!)
+                // Scarichiamo il Modello Italiano tramite Fetch Sicuro Locale
                 await downloadWithProgress(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
 
-                // 2. Scarichiamo il Motore Javascript
+                // Scarichiamo il Motore Javascript
                 progressContent.textContent = "Download Motore Vocale JS...";
                 progressBarFill.style.width = '90%';
                 await downloadWithoutProgress(JS_ENGINE_URL, VOSK_CACHE_NAME);
 
-                // Download completati!
-                progressContent.textContent = "Tutto pronto! Installo...";
-                progressBarFill.style.width = '100%';
+                // Download completati! Prepara il bottone per il SECONDO CLICK
+                setupFinalInstallStep(true);
 
             } catch (err) {
                 console.error("Download forzato fallito:", err);
-                progressContent.textContent = "Avvio installazione base...";
-                progressBarFill.style.background = "#f59e0b"; // Arancione di avviso
+                progressBarFill.style.background = "#f59e0b"; // Arancione
                 progressBarFill.style.width = '100%';
+                // Preparo il bottone per il SECONDO CLICK anche in caso di errore
+                setupFinalInstallStep(false);
             }
-
-            // Ritardo di cortesia per leggere l'esito prima di aprire il prompt di Android
-            setTimeout(async () => {
-                if (deferredPrompt) {
-                    try {
-                        deferredPrompt.prompt();
-                        const { outcome } = await deferredPrompt.userChoice;
-                        console.log('Risultato installazione:', outcome);
-                    } catch (e) {
-                        console.error("Prompt error:", e);
-                    }
-                    deferredPrompt = null;
-                }
-                progressContainer.style.display = 'none';
-            }, 1200);
         });
 
+        // FASE 2: Funzione per preparare il bottone al tocco finale richiesto da Android
+        function setupFinalInstallStep(isSuccess) {
+            progressContent.innerHTML = isSuccess ? "🚀 TOCCA QUI PER INSTALLARE" : "⚠️ IGNORA E INSTALLA";
+            progressContainer.classList.add('ready-to-install');
+            
+            // Aggiungiamo l'evento click finale sulla barra completata
+            progressContainer.onclick = async () => {
+                if (!deferredPrompt) return; // Sicurezza
+                
+                // Rimuoviamo la classe per evitare doppi click
+                progressContainer.classList.remove('ready-to-install');
+                progressContainer.onclick = null;
+
+                try {
+                    // Questo DEVE avvenire istantaneamente al click, o Chrome lo blocca
+                    deferredPrompt.prompt();
+                    
+                    // Mostriamo l'animazione di "Attesa installazione OS"
+                    progressContent.textContent = "🔄 Installazione nel sistema in corso...";
+                    progressBarFill.style.background = "#10b981"; // Verde smeraldo
+                    progressBarFill.classList.add('pulse-install'); // Animazione pulsante
+
+                    const { outcome } = await deferredPrompt.userChoice;
+                    console.log('Risultato installazione utente:', outcome);
+                    
+                    if (outcome !== 'accepted') {
+                        // L'utente ha annullato il pop-up nativo
+                        progressContainer.style.display = 'none';
+                        installBanner.style.display = 'flex'; // Riappare il bottone iniziale
+                    }
+                    // Se accettato, lasciamo l'animazione pulsante: sparirà con l'evento 'appinstalled'
+                    
+                } catch (e) {
+                    console.error("Prompt error:", e);
+                }
+                deferredPrompt = null;
+            };
+        }
+
+        // FASE 3: Il sistema operativo ci avvisa che l'installazione è finita
         window.addEventListener('appinstalled', () => { 
             installBanner.style.display = 'none'; 
             progressContainer.style.display = 'none';
             deferredPrompt = null; 
+            console.log("Installazione Android confermata. PWA attiva.");
         });
 
         // FUNZIONE: Fetch robusto con stream sbloccato
         async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
-            // Un semplice fetch locale senza trucchi strani
             const response = await fetch(url);
             
             if (!response.ok) throw new Error(`Codice errore server: ${response.status}`);
             
-            // Creiamo un clone ESATTO della risposta per passarlo al Service Worker
             const responseClone = response.clone();
             caches.open(cacheName).then(cache => cache.put(url, responseClone));
 
-            // Misuriamo il file dal Content-Length (ora che è locale, il server GitHub ce lo dirà sicuramente)
             const contentLength = response.headers.get('content-length');
-            const total = contentLength ? parseInt(contentLength, 10) : 50000000; // Stima di 50MB se mancante
+            const total = contentLength ? parseInt(contentLength, 10) : 50000000; 
             
             if (!response.body) {
                 progressBarFill.style.width = `${endPct}%`;
                 return;
             }
 
-            // Leggiamo lo stream dinamicamente per muovere la barra
             let loaded = 0;
             const reader = response.body.getReader();
             
@@ -205,7 +250,7 @@
                 loaded += value.byteLength;
                 
                 let progress = loaded / total;
-                if (progress > 1) progress = 1; // Evita di superare il 100% se la stima era errata
+                if (progress > 1) progress = 1; 
                 
                 const currentPct = startPct + (progress * (endPct - startPct));
                 const mbLoaded = (loaded / (1024*1024)).toFixed(1);
@@ -216,7 +261,6 @@
             }
         }
 
-        // FUNZIONE: Fetch silenziosa per file JS piccoli
         async function downloadWithoutProgress(url, cacheName) {
             const response = await fetch(url);
             if (!response.ok) throw new Error(`Errore JS: ${response.status}`);
