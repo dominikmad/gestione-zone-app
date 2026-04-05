@@ -1,0 +1,16 @@
+{
+  "name": "Gestione Zone App",
+  "short_name": "ZoneApp",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f0f2f5",
+  "theme_color": "#4a90e2",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
