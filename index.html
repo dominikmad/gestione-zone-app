@@ -19,18 +19,31 @@
             cursor: pointer; border: 2px solid white; white-space: nowrap;
         }
 
-        /* Nuova Barra di Progresso (STESSO DESIGN DEL PULSANTE) */
+        /* STRATEGIA 2: Banner Permesso Preventivo (Il Battesimo) */
+        #mic-permission-banner {
+            display: none; position: fixed; bottom: 95px; left: 50%; transform: translateX(-50%);
+            background: #f59e0b; color: white; padding: 14px 24px; border-radius: 50px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9998; font-weight: bold; font-size: 15px;
+            cursor: pointer; border: 2px solid white; white-space: nowrap; align-items: center; gap: 8px;
+            animation: pulse-orange 2s infinite;
+        }
+        @keyframes pulse-orange {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+
+        /* Barra di Progresso (STESSO DESIGN DEL PULSANTE) */
         #progress-container {
             display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: #1e3a8a; /* Blu scuro (sfondo traccia) */
+            background: #1e3a8a; 
             color: white; border-radius: 50px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; 
             width: 85%; max-width: 350px; border: 2px solid white;
-            overflow: hidden; /* Mantiene l'effetto smussato sulla barra interna */
+            overflow: hidden; 
             transition: transform 0.2s, box-shadow 0.2s;
         }
         
-        /* Classe per quando il contenitore diventa cliccabile */
         #progress-container.ready-to-install {
             cursor: pointer;
             box-shadow: 0 0 15px rgba(59, 130, 246, 0.8);
@@ -42,18 +55,12 @@
         
         #progress-bar-fill {
             position: absolute; top: 0; left: 0; height: 100%; width: 0%; 
-            background: #3b82f6; /* Azzurro (colore progresso) */
+            background: #3b82f6; 
             transition: width 0.2s ease-out, background-color 0.3s; z-index: 1;
         }
 
-        /* Animazione pulsante per l'installazione nativa in corso */
-        .pulse-install {
-            animation: install-pulse 1.5s infinite alternate;
-        }
-        @keyframes install-pulse {
-            0% { opacity: 0.7; }
-            100% { opacity: 1; }
-        }
+        .pulse-install { animation: install-pulse 1.5s infinite alternate; }
+        @keyframes install-pulse { 0% { opacity: 0.7; } 100% { opacity: 1; } }
         
         #progress-content {
             position: relative; z-index: 2; padding: 14px 28px; text-align: center; 
@@ -90,12 +97,12 @@
     <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
 </head>
 <body>
-    <!-- Overlay Bypass Sicurezza -->
+    <!-- Overlay Bypass Sicurezza (Paracadute Timeout) -->
     <div id="vosk-gesture-overlay">
         <div class="gesture-btn" id="vosk-gesture-btn">🎤</div>
-        <h2 style="margin:0; text-align:center;">Tocca per Avviare</h2>
+        <h2 style="margin:0; text-align:center;">Tocca per Sbloccare</h2>
         <p style="color: #ccc; text-align: center; padding: 0 30px; font-size:14px; margin-top:10px;">
-            Il dispositivo richiede un tocco diretto qui<br>per autorizzare il microfono offline.
+            Il sistema ha bloccato il microfono in background.<br>Tocca l'icona per autorizzarlo manualmente.
         </p>
         <button id="vosk-gesture-cancel" style="margin-top:40px; padding:12px 25px; background:#444; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">Annulla</button>
     </div>
@@ -109,17 +116,65 @@
     <!-- Elementi di Installazione -->
     <div id="install-banner">📱 Installa l'App sul Telefono</div>
     
-    <!-- Barra di Download Intelligente (Fusa col pulsante) -->
+    <!-- STRATEGIA 2: Banner "Battesimo" Permessi -->
+    <div id="mic-permission-banner">🎤 Abilita Microfono Offline</div>
+
+    <!-- Barra di Download Intelligente -->
     <div id="progress-container">
         <div id="progress-bar-fill"></div>
         <div id="progress-content">Preparazione download AI...</div>
     </div>
 
     <script>
-        // COSTANTI DEI FILE DA SCARICARE FORZATAMENTE
+        // COSTANTI DEI FILE
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
         const MODEL_URL = './vosk-model-small-it-0.22.zip';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
+
+        // --- 0. STRATEGIA 2: GESTIONE PREVENTIVA PERMESSI (IL BATTESIMO) ---
+        const micBanner = document.getElementById('mic-permission-banner');
+
+        async function checkMicPermission() {
+            try {
+                const result = await navigator.permissions.query({ name: 'microphone' });
+                // Se il permesso non è stato ancora dato in modo permanente a GitHub, mostriamo il banner
+                if (result.state === 'prompt') {
+                    micBanner.style.display = 'flex';
+                } else {
+                    micBanner.style.display = 'none';
+                }
+                
+                // Ascoltatore live: se l'utente accetta dal banner, lo nascondiamo sùbito
+                result.onchange = function() {
+                    if (this.state === 'granted') micBanner.style.display = 'none';
+                };
+            } catch (e) {
+                // Fallback di sicurezza per vecchi browser
+                micBanner.style.display = 'flex';
+            }
+        }
+
+        micBanner.addEventListener('click', async () => {
+            try {
+                // Richiediamo l'accesso al microfono direttamente dal dominio padre (GitHub)
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // Permesso ottenuto! Spegniamo immediatamente le tracce (non ci serve registrare ora)
+                stream.getTracks().forEach(track => track.stop());
+                
+                micBanner.style.display = 'none';
+                showVoskStatus('✅ Permesso salvato con successo!', false);
+                setTimeout(hideVoskStatus, 3000);
+            } catch (err) {
+                console.error("Permesso negato dall'utente:", err);
+                showVoskStatus('❌ Permesso negato. Serve per l\'uso offline.', false);
+                setTimeout(hideVoskStatus, 3000);
+            }
+        });
+
+        // Controlla i permessi all'avvio
+        window.addEventListener('load', checkMicPermission);
+
 
         // --- 1. REGISTRAZIONE SW E LOGICA DI INSTALLAZIONE ---
         if ('serviceWorker' in navigator) {
@@ -143,12 +198,11 @@
             installBanner.style.display = 'flex';
         });
 
-        // FASE 1: Click su "Installa l'App" (Avvia il download)
         installBanner.addEventListener('click', async () => {
             installBanner.style.display = 'none';
             progressContainer.style.display = 'block';
-            progressContainer.classList.remove('ready-to-install'); // Assicuriamoci che non sia cliccabile
-            progressContainer.onclick = null; // Rimuovi vecchi listener
+            progressContainer.classList.remove('ready-to-install'); 
+            progressContainer.onclick = null; 
             progressBarFill.classList.remove('pulse-install');
             progressBarFill.style.background = '#3b82f6';
 
@@ -156,58 +210,46 @@
                 progressContent.textContent = "Verifica requisiti offline...";
                 progressBarFill.style.width = '10%';
 
-                // Scarichiamo il Modello Italiano tramite Fetch Sicuro Locale
                 await downloadWithProgress(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
-
-                // Scarichiamo il Motore Javascript
+                
                 progressContent.textContent = "Download Motore Vocale JS...";
                 progressBarFill.style.width = '90%';
                 await downloadWithoutProgress(JS_ENGINE_URL, VOSK_CACHE_NAME);
 
-                // Download completati! Prepara il bottone per il SECONDO CLICK
                 setupFinalInstallStep(true);
 
             } catch (err) {
                 console.error("Download forzato fallito:", err);
-                progressBarFill.style.background = "#f59e0b"; // Arancione
+                progressBarFill.style.background = "#f59e0b"; 
                 progressBarFill.style.width = '100%';
-                // Preparo il bottone per il SECONDO CLICK anche in caso di errore
                 setupFinalInstallStep(false);
             }
         });
 
-        // FASE 2: Funzione per preparare il bottone al tocco finale richiesto da Android
         function setupFinalInstallStep(isSuccess) {
             progressContent.innerHTML = isSuccess ? "🚀 TOCCA QUI PER INSTALLARE" : "⚠️ IGNORA E INSTALLA";
             progressContainer.classList.add('ready-to-install');
             
-            // Aggiungiamo l'evento click finale sulla barra completata
             progressContainer.onclick = async () => {
-                if (!deferredPrompt) return; // Sicurezza
+                if (!deferredPrompt) return; 
                 
-                // Rimuoviamo la classe per evitare doppi click
                 progressContainer.classList.remove('ready-to-install');
                 progressContainer.onclick = null;
 
                 try {
-                    // Questo DEVE avvenire istantaneamente al click, o Chrome lo blocca
                     deferredPrompt.prompt();
                     
-                    // Mostriamo l'animazione di "Attesa installazione OS"
                     progressContent.textContent = "🔄 Installazione nel sistema in corso...";
-                    progressBarFill.style.background = "#10b981"; // Verde smeraldo
-                    progressBarFill.classList.add('pulse-install'); // Animazione pulsante
+                    progressBarFill.style.background = "#10b981"; 
+                    progressBarFill.classList.add('pulse-install'); 
 
                     const { outcome } = await deferredPrompt.userChoice;
                     console.log('Risultato installazione utente:', outcome);
                     
                     if (outcome !== 'accepted') {
-                        // L'utente ha annullato il pop-up nativo
                         progressContainer.style.display = 'none';
-                        installBanner.style.display = 'flex'; // Riappare il bottone iniziale
+                        installBanner.style.display = 'flex'; 
                     }
-                    // Se accettato, lasciamo l'animazione pulsante: sparirà con l'evento 'appinstalled'
-                    
                 } catch (e) {
                     console.error("Prompt error:", e);
                 }
@@ -215,7 +257,6 @@
             };
         }
 
-        // FASE 3: Il sistema operativo ci avvisa che l'installazione è finita
         window.addEventListener('appinstalled', () => { 
             installBanner.style.display = 'none'; 
             progressContainer.style.display = 'none';
@@ -223,10 +264,8 @@
             console.log("Installazione Android confermata. PWA attiva.");
         });
 
-        // FUNZIONE: Fetch robusto con stream sbloccato
         async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
             const response = await fetch(url);
-            
             if (!response.ok) throw new Error(`Codice errore server: ${response.status}`);
             
             const responseClone = response.clone();
@@ -248,7 +287,6 @@
                 if (done) break;
                 
                 loaded += value.byteLength;
-                
                 let progress = loaded / total;
                 if (progress > 1) progress = 1; 
                 
@@ -327,14 +365,28 @@
                 return;
             }
 
+            // STRATEGIA 1: LA GARA A TEMPO (Timeout di sicurezza contro il coma silenzioso)
+            let micReady = false;
+            let safetyTimeout = setTimeout(() => {
+                if (!micReady) {
+                    console.warn("Timeout Sicurezza: Il browser non ha risposto. Forza sblocco manuale.");
+                    hideVoskStatus();
+                    gestureOverlay.style.display = 'flex';
+                }
+            }, 1500); // 1.5 secondi di tolleranza
+
             try {
                 showVoskStatus('Richiesta microfono...');
                 
+                // Chiamata critica al sistema operativo
                 mediaStream = await navigator.mediaDevices.getUserMedia({
                     video: false,
                     audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 }
                 });
 
+                // Se arriviamo qui, il microfono si è acceso! Spegniamo la sveglia.
+                micReady = true;
+                clearTimeout(safetyTimeout);
                 gestureOverlay.style.display = 'none';
 
                 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -372,7 +424,9 @@
                 showVoskStatus('In ascolto offline...', true);
 
             } catch (err) {
-                console.error("Errore avvio microfono (Blocco di Sicurezza):", err);
+                micReady = true; // Ferma il timeout anche in caso di errore catchabile
+                clearTimeout(safetyTimeout);
+                console.error("Errore avvio microfono (Blocco di Sicurezza catchato):", err);
                 
                 if (!isDirectGesture) {
                     hideVoskStatus();
@@ -403,7 +457,7 @@
         // --- GESTIONE EVENTI OVERLAY ---
         document.getElementById('vosk-gesture-btn').addEventListener('click', () => {
             if (currentTargetInputId) {
-                startVoskListening(currentTargetInputId, true);
+                startVoskListening(currentTargetInputId, true); // Rilancia con tocco fisico = true
             }
         });
 
