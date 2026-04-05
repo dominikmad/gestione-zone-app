@@ -111,7 +111,7 @@
     <script>
         // COSTANTI DEI FILE
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
-        // RIPRISTINATO LO ZIP ORIGINALE (Richiesto nativamente da WebAssembly/Vosk)
+        // ASSICURATI CHE QUESTO FILE SIA PRESENTE SU GITHUB
         const MODEL_URL = './vosk-model-small-it-0.22.zip';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
 
@@ -323,9 +323,8 @@
                 }, 300);
 
                 // GARA A TEMPO (Timeout Sicurezza RAM Mobile):
-                // FIX VERO: Portato a 90 SECONDI. I dispositivi vecchi hanno bisogno di respiro per estrarre 45MB in RAM!
                 const modelPromise = window.Vosk.createModel(MODEL_URL);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly")), 90000));
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout di 90s raggiunto.")), 90000));
                 
                 voskModel = await Promise.race([modelPromise, timeoutPromise]);
                 
@@ -348,9 +347,11 @@
                 console.error("Errore caricamento modello Vosk:", err);
                 
                 if (!isNetworkOverride) {
-                    // Errore reale solo se sfora i 90 secondi o se manca la memoria di sistema
-                    showVoskStatus('Errore Modello. Spazio o RAM insufficienti.');
-                    setTimeout(hideVoskStatus, 4000);
+                    // STAMPIAMO L'ERRORE REALE A VIDEO
+                    const realError = err.message ? err.message : String(err);
+                    showVoskStatus('Errore AI: ' + realError);
+                    // Lasciamo l'errore visibile un po' di più per darti il tempo di leggerlo
+                    setTimeout(hideVoskStatus, 6000);
                 }
                 return false;
             }
