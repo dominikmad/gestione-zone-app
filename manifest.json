@@ -1,6 +1,6 @@
 {
-  "name": "Gestione Zone App",
-  "short_name": "ZoneApp",
+  "name": "Casellario Smart",
+  "short_name": "Casellario Smart",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f0f2f5",
