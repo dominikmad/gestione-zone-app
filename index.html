@@ -111,8 +111,9 @@
     <script>
         // COSTANTI DEI FILE
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
-        // ASSICURATI CHE QUESTO FILE SIA PRESENTE SU GITHUB
-        const MODEL_URL = './vosk-model-small-it-0.22.zip';
+        
+        // ATTENZIONE: HO CAMBIATO L'ESTENSIONE IN .tar.gz (Vedi analisi sotto)
+        const MODEL_URL = './vosk-model-small-it-0.22.tar.gz';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
 
         // --- 1. REGISTRAZIONE SW E LOGICA DI INSTALLAZIONE ---
@@ -186,7 +187,8 @@
                 progressContainer.classList.remove('ready-to-install');
                 progressContainer.onclick = null;
 
-                progressContent.textContent = "🔄 Installazione nel sistema in corso...";
+                // Testo modificato come richiesto
+                progressContent.textContent = "Installazione in corso...";
                 progressBarFill.style.background = "#10b981"; 
                 progressBarFill.classList.add('pulse-install'); 
 
@@ -200,7 +202,6 @@
                             progressContainer.style.display = 'none';
                             installBanner.style.display = 'flex'; 
                         }
-                        // Se accettato, l'evento 'appinstalled' prenderà il controllo visivo
                     } catch (e) {
                         console.error("Prompt error:", e);
                     }
@@ -212,14 +213,15 @@
         window.addEventListener('appinstalled', () => { 
             installBanner.style.display = 'none'; 
             
-            // FIX VISIVO: Mantiene la barra visibile durante la creazione dell'icona da parte di Android
-            progressContent.textContent = "✅ App installata! Creazione icona in corso...";
+            // FIX TESTO COME RICHIESTO DALL'UTENTE
+            progressContent.textContent = "Installazione in corso...";
             progressBarFill.style.background = "#10b981"; 
-            progressBarFill.classList.remove('pulse-install');
+            progressBarFill.classList.add('pulse-install');
             
+            // Timeout portato a 8 secondi
             setTimeout(() => {
                 progressContainer.style.display = 'none';
-            }, 6000); // 6 secondi di grazia prima di nascondersi dolcemente
+            }, 8000); 
             
             deferredPrompt = null; 
             console.log("Installazione Android confermata. PWA attiva.");
@@ -233,7 +235,7 @@
             caches.open(cacheName).then(cache => cache.put(url, responseClone));
 
             const contentLength = response.headers.get('content-length');
-            const total = contentLength ? parseInt(contentLength, 10) : 50000000; 
+            const total = contentLength ? parseInt(contentLength, 10) : 45000000; 
             
             if (!response.body) {
                 progressBarFill.style.width = `${endPct}%`;
@@ -322,7 +324,6 @@
                     showVoskStatus(`Preparazione IA Offline: ${fakeProgress}%...`);
                 }, 300);
 
-                // GARA A TEMPO (Timeout Sicurezza RAM Mobile):
                 const modelPromise = window.Vosk.createModel(MODEL_URL);
                 const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout di 90s raggiunto.")), 90000));
                 
@@ -347,10 +348,8 @@
                 console.error("Errore caricamento modello Vosk:", err);
                 
                 if (!isNetworkOverride) {
-                    // STAMPIAMO L'ERRORE REALE A VIDEO
                     const realError = err.message ? err.message : String(err);
                     showVoskStatus('Errore AI: ' + realError);
-                    // Lasciamo l'errore visibile un po' di più per darti il tempo di leggerlo
                     setTimeout(hideVoskStatus, 6000);
                 }
                 return false;
