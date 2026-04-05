@@ -7,75 +7,201 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#4a90e2">
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #f0f2f5; }
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #f0f2f5; font-family: Arial, sans-serif; }
         iframe { width: 100%; height: 100%; border: none; display: block; }
         
-        /* Stile del bottone di installazione fluttuante */
         #install-banner {
-            display: none; /* Nascosto di default, appare solo se installabile */
-            position: fixed;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #2563eb;
-            color: white;
-            padding: 14px 28px;
-            border-radius: 50px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-            z-index: 9999;
-            font-family: Arial, sans-serif;
-            font-weight: bold;
-            font-size: 16px;
-            cursor: pointer;
-            align-items: center;
-            justify-content: center;
-            border: 2px solid white;
-            transition: transform 0.2s;
-            white-space: nowrap;
+            display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: #2563eb; color: white; padding: 14px 28px; border-radius: 50px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; font-weight: bold; font-size: 16px;
+            cursor: pointer; border: 2px solid white; white-space: nowrap;
         }
-        #install-banner:active { transform: translateX(-50%) scale(0.95); }
+        
+        /* Banner di stato per Vosk (Caricamento e Ascolto) */
+        #vosk-status {
+            display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+            background: #333; color: white; padding: 8px 16px; border-radius: 20px;
+            font-size: 13px; z-index: 10000; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            align-items: center; gap: 8px; font-weight: bold;
+        }
+        .pulse-dot { width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
     </style>
+    
+    <!-- Importiamo la libreria ufficiale di Vosk per il Browser -->
+    <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
 </head>
 <body>
+    <!-- Il popup di stato di Vosk -->
+    <div id="vosk-status"><span class="pulse-dot" id="vosk-dot"></span><span id="vosk-msg">Inizializzazione Motore Offline...</span></div>
+
+    <!-- Il tuo gestionale. SOSTITUISCI IL LINK QUI SOTTO CON QUELLO REALE -->
     <iframe id="gas-frame" src="https://script.google.com/macros/s/AKfycbyQ9vr71henXHbr6QXDlE9N-We26aoAodf6mm_Rsue9dQVbPBEfjbAlIQ2J8FYdqMDTmA/exec" allow="microphone"></iframe>
 
     <div id="install-banner">📱 Installa l'App sul Telefono</div>
 
     <script>
-        // 1. Registriamo il Service Worker per sbloccare l'installazione
+        // --- 1. REGISTRAZIONE PWA CON PROTEZIONE PROTOCOLLO ---
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-            .then(() => console.log('Service Worker registrato con successo!'))
-            .catch(err => console.error('Errore Service Worker:', err));
+            // Verifichiamo che il protocollo sia supportato (http o https) per evitare errori in anteprima blob
+            const isSupportedProtocol = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+            
+            if (isSupportedProtocol) {
+                navigator.serviceWorker.register('sw.js')
+                .then(() => console.log('Service Worker registrato con successo!'))
+                .catch(err => console.error('Errore SW:', err));
+            } else {
+                console.warn('Service Worker non registrato: protocollo non supportato (Anteprima). Funzionerà su GitHub Pages.');
+            }
         }
 
-        // 2. Logica di Installazione PWA
         let deferredPrompt;
         const installBanner = document.getElementById('install-banner');
-
-        // Chrome/Android lancia questo evento se l'app è pronta per essere installata
         window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault(); // Blocca il mini-banner noioso nativo di Google
-            deferredPrompt = e; // Salva l'evento per usarlo dopo
-            installBanner.style.display = 'flex'; // Mostra il nostro bellissimo bottone gigante!
+            e.preventDefault(); deferredPrompt = e; installBanner.style.display = 'block';
         });
-
-        // Quando l'utente clicca il nostro bottone
         installBanner.addEventListener('click', async () => {
-            installBanner.style.display = 'none'; // Nascondi il bottone
-            if (deferredPrompt) {
-                deferredPrompt.prompt(); // Mostra il popup di sistema Android per installare
-                const { outcome } = await deferredPrompt.userChoice;
-                console.log('Risultato installazione:', outcome);
-                deferredPrompt = null;
-            }
-        });
-
-        // Se l'installazione va a buon fine, puliamo tutto
-        window.addEventListener('appinstalled', () => {
             installBanner.style.display = 'none';
-            deferredPrompt = null;
-            console.log('PWA installata con successo!');
+            if (deferredPrompt) { await deferredPrompt.prompt(); deferredPrompt = null; }
+        });
+        window.addEventListener('appinstalled', () => { installBanner.style.display = 'none'; deferredPrompt = null; });
+
+        // --- 2. MOTORE VOSK OFFLINE ---
+        let voskModel = null;
+        let recognizer = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let source = null;
+        let processor = null;
+        let currentTargetInputId = null; // Memorizza chi ha chiesto l'ascolto
+        let isListening = false;
+
+        const statusUI = document.getElementById('vosk-status');
+        const statusMsg = document.getElementById('vosk-msg');
+        const statusDot = document.getElementById('vosk-dot');
+
+        function showVoskStatus(msg, isRecording = false) {
+            statusUI.style.display = 'flex';
+            statusMsg.textContent = msg;
+            statusDot.style.backgroundColor = isRecording ? '#ef4444' : '#f59e0b'; // Rosso se ascolta, Arancio se carica
+            statusDot.style.animation = isRecording ? 'pulse 1.5s infinite' : 'none';
+        }
+
+        function hideVoskStatus() {
+            statusUI.style.display = 'none';
+        }
+
+        // Funzione per caricare il modello (pesa 45MB, la prima volta ci mette un po', poi è istantaneo dalla cache)
+        async function initVoskModel() {
+            if (voskModel) return true;
+            try {
+                showVoskStatus('Download modello lingua Italiana (solo prima volta)...');
+                // Link ufficiale del modello small in italiano compresso
+                const modelUrl = 'https://models.alphacephei.com/vosk-model-small-it-0.4.zip';
+                
+                // Creiamo il modello. Il service worker intercetterà questa chiamata e la salvererà!
+                voskModel = await window.Vosk.createModel(modelUrl);
+                return true;
+            } catch (err) {
+                console.error("Errore caricamento modello Vosk:", err);
+                showVoskStatus('Errore Modello. Riprova con rete.');
+                setTimeout(hideVoskStatus, 3000);
+                return false;
+            }
+        }
+
+        async function startVoskListening(targetId) {
+            if (isListening) return;
+            currentTargetInputId = targetId;
+            
+            const modelLoaded = await initVoskModel();
+            if (!modelLoaded) return;
+
+            try {
+                showVoskStatus('Richiesta microfono...');
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: false,
+                    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 }
+                });
+
+                audioContext = new AudioContext();
+                source = audioContext.createMediaStreamSource(mediaStream);
+                
+                // Creiamo il riconoscitore
+                recognizer = new voskModel.KaldiRecognizer(audioContext.sampleRate);
+                
+                recognizer.on("result", (message) => {
+                    const text = message.result.text;
+                    if (text && text.trim().length > 0) {
+                        // Spediamo il risultato finale dentro l'Iframe di Google Apps Script!
+                        document.getElementById('gas-frame').contentWindow.postMessage({
+                            type: 'VOSK_RESULT',
+                            text: text,
+                            targetId: currentTargetInputId
+                        }, '*');
+                        stopVoskListening(); // Ferma l'ascolto dopo una frase conclusa
+                    }
+                });
+
+                recognizer.on("partialresult", (message) => {
+                    // (Opzionale) Potremmo inviare i risultati parziali mentre l'utente parla
+                });
+
+                // Creiamo il nodo che passa l'audio dal microfono a Vosk
+                processor = audioContext.createScriptProcessor(4096, 1, 1);
+                processor.onaudioprocess = (event) => {
+                    try {
+                        recognizer.acceptWaveform(event.inputBuffer);
+                    } catch (error) { console.error('Audio Process Error', error); }
+                };
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+                
+                isListening = true;
+                showVoskStatus('In ascolto offline...', true);
+
+            } catch (err) {
+                console.error("Errore avvio microfono:", err);
+                showVoskStatus('Permesso Microfono Negato.');
+                setTimeout(hideVoskStatus, 3000);
+            }
+        }
+
+        function stopVoskListening() {
+            if (!isListening) return;
+            isListening = false;
+            
+            if (processor) { processor.disconnect(); processor = null; }
+            if (source) { source.disconnect(); source = null; }
+            if (mediaStream) { mediaStream.getTracks().forEach(track => track.stop()); mediaStream = null; }
+            if (audioContext && audioContext.state !== 'closed') { audioContext.close(); audioContext = null; }
+            if (recognizer) { recognizer.remove(); recognizer = null; }
+            
+            hideVoskStatus();
+            
+            // Diciamo a Google che abbiamo spento il microfono
+            document.getElementById('gas-frame').contentWindow.postMessage({
+                type: 'VOSK_STOPPED',
+                targetId: currentTargetInputId
+            }, '*');
+        }
+
+        // --- 3. IL RICEVITORE DAL GESTIONALE ---
+        // Ascoltiamo i comandi che arrivano dall'Iframe (Google Apps Script)
+        window.addEventListener('message', (event) => {
+            // Ignoriamo messaggi non formattati correttamente
+            if (!event.data || !event.data.action) return;
+
+            console.log("Messaggio ricevuto dal Gestionale:", event.data.action);
+
+            if (event.data.action === 'START_VOSK') {
+                // Il gestionale ci ha chiesto di avviare la dettatura!
+                startVoskListening(event.data.targetId);
+            } 
+            else if (event.data.action === 'STOP_VOSK') {
+                stopVoskListening();
+            }
         });
     </script>
 </body>
