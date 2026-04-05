@@ -28,6 +28,7 @@
         }
         #progress-text {
             font-size: 13px; font-weight: bold; margin-bottom: 10px; text-align: center; color: #2563eb;
+            word-wrap: break-word; /* Permette di andare a capo per leggere gli errori lunghi */
         }
         #progress-bar-bg {
             width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden;
@@ -61,7 +62,7 @@
         }
     </style>
     
-    <!-- Importiamo la libreria ufficiale di Vosk per il Browser (Verrà cachata dall'installazione) -->
+    <!-- Importiamo la libreria ufficiale di Vosk per il Browser -->
     <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
 </head>
 <body>
@@ -127,10 +128,10 @@
                 progressText.textContent = "Verifica requisiti offline...";
                 progressBarFill.style.width = '10%';
 
-                // 1. Scarichiamo il Modello Italiano con misurazione in tempo reale
+                // 1. Scarichiamo il Modello Italiano
                 await downloadWithProgress(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
 
-                // 2. Scarichiamo il Motore Javascript in background (Veloce, diamo il 20% finale)
+                // 2. Scarichiamo il Motore Javascript in background
                 progressText.textContent = "Download Motore Vocale JS...";
                 progressBarFill.style.width = '90%';
                 await downloadWithoutProgress(JS_ENGINE_URL, VOSK_CACHE_NAME);
@@ -154,7 +155,8 @@
 
             } catch (err) {
                 console.error("Errore durante il download forzato:", err);
-                progressText.textContent = "Errore di Rete. Riprova più tardi.";
+                // ORA MOSTRIAMO L'ERRORE VERO E PROPRIO A SCHERMO
+                progressText.textContent = "Errore: " + err.message;
                 progressText.style.color = "red";
                 progressBarFill.style.background = "red";
                 
@@ -164,7 +166,7 @@
                     progressText.style.color = "#2563eb";
                     progressBarFill.style.background = "#2563eb";
                     progressBarFill.style.width = '0%';
-                }, 4000);
+                }, 5000);
             }
         });
 
@@ -174,72 +176,59 @@
             deferredPrompt = null; 
         });
 
-        // FUNZIONE: Fetch con misurazione dei Byte per la Barra (Modello ZIP)
+        // FUNZIONE: Fetch con salvataggio sicuro e misurazione
         async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+            // Aggiungiamo cache: 'reload' per ignorare vecchie versioni rotte
+            const request = new Request(url, { cache: 'reload' });
+            const response = await fetch(request);
             
+            if (!response.ok) throw new Error(`Codice errore server: ${response.status}`);
+            
+            const cache = await caches.open(cacheName);
+            
+            // PRECAUZIONE ESTREMA: Mettiamo SUBITO in cache il clone in background, 
+            // così non entra in conflitto con la lettura del reader
+            const cloneToCache = response.clone();
+            await cache.put(request, cloneToCache);
+
             const contentLength = response.headers.get('content-length');
-            if (!contentLength) {
-                // Se il server non fornisce il peso, scarichiamo alla cieca e mettiamo in cache
-                const cache = await caches.open(cacheName);
-                await cache.put(url, response.clone());
+            
+            // Se non c'è il content-length (Server non supporta stream), nascondiamo solo l'avanzamento visivo
+            if (!contentLength || !response.body) {
+                console.log("Stream reader non supportato, file salvato comunque.");
+                progressBarFill.style.width = `${endPct}%`;
                 return;
             }
 
+            // Leggiamo lo stream solo per muovere la barra visiva
             const total = parseInt(contentLength, 10);
             let loaded = 0;
-
             const reader = response.body.getReader();
-            const stream = new ReadableStream({
-                start(controller) {
-                    function push() {
-                        reader.read().then(({ done, value }) => {
-                            if (done) {
-                                controller.close();
-                                return;
-                            }
-                            loaded += value.byteLength;
-                            
-                            // Calcolo per la barra (es. dal 10% all'80%)
-                            const progress = loaded / total;
-                            const currentPct = startPct + (progress * (endPct - startPct));
-                            
-                            const mbLoaded = (loaded / (1024*1024)).toFixed(1);
-                            const mbTotal = (total / (1024*1024)).toFixed(1);
-                            
-                            progressText.textContent = `Download ${itemName} (${mbLoaded} MB / ${mbTotal} MB)...`;
-                            progressBarFill.style.width = `${currentPct}%`;
-                            
-                            controller.enqueue(value);
-                            push();
-                        }).catch(err => {
-                            console.error("Errore stream", err);
-                            controller.error(err);
-                        });
-                    }
-                    push();
-                }
-            });
-
-            const newResponse = new Response(stream, {
-                headers: response.headers,
-                status: response.status,
-                statusText: response.statusText
-            });
-
-            const cache = await caches.open(cacheName);
-            await cache.put(url, newResponse);
+            
+            while(true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                loaded += value.byteLength;
+                
+                const progress = loaded / total;
+                const currentPct = startPct + (progress * (endPct - startPct));
+                
+                const mbLoaded = (loaded / (1024*1024)).toFixed(1);
+                const mbTotal = (total / (1024*1024)).toFixed(1);
+                
+                progressText.textContent = `Download ${itemName} (${mbLoaded} MB / ${mbTotal} MB)...`;
+                progressBarFill.style.width = `${currentPct}%`;
+            }
         }
 
         // FUNZIONE: Fetch silenziosa senza misurazione (Motore JS)
         async function downloadWithoutProgress(url, cacheName) {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+            const request = new Request(url, { cache: 'reload' });
+            const response = await fetch(request);
+            if (!response.ok) throw new Error(`Codice errore server JS: ${response.status}`);
             const cache = await caches.open(cacheName);
-            await cache.put(url, response.clone());
+            await cache.put(request, response.clone());
         }
-
 
         // --- 2. MOTORE VOSK OFFLINE ---
         let voskModel = null;
@@ -279,7 +268,6 @@
             if (voskModel) return true;
             try {
                 showVoskStatus('Inizializzazione Motore AI Offline...');
-                // Ora il motore caricherà ISTANTANEAMENTE il modello dalla Cache che abbiamo forzato!
                 voskModel = await window.Vosk.createModel(MODEL_URL);
                 return true;
             } catch (err) {
