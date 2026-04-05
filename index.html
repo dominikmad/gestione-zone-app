@@ -111,6 +111,7 @@
     <script>
         // COSTANTI DEI FILE
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
+        // RIPRISTINATO LO ZIP ORIGINALE (Richiesto nativamente da WebAssembly/Vosk)
         const MODEL_URL = './vosk-model-small-it-0.22.zip';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
 
@@ -149,11 +150,9 @@
             try {
                 progressContent.textContent = "Autorizza il microfono per l'uso offline...";
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                // Permesso ottenuto! Spegniamo immediatamente le tracce
                 stream.getTracks().forEach(track => track.stop());
             } catch (err) {
                 console.warn("Permesso microfono negato in fase di installazione:", err);
-                // Procediamo comunque con l'installazione, ma il Guscio farà scattare l'overlay nero se usato offline
             }
 
             // FASE 2: DOWNLOAD DEI FILE AI
@@ -187,17 +186,13 @@
                 progressContainer.classList.remove('ready-to-install');
                 progressContainer.onclick = null;
 
-                // 1. Applica le modifiche in memoria PRIMA
                 progressContent.textContent = "🔄 Installazione nel sistema in corso...";
                 progressBarFill.style.background = "#10b981"; 
                 progressBarFill.classList.add('pulse-install'); 
 
-                // 2. Cede il controllo al browser (DOM Repaint Block Fix) per 100ms 
-                // permettendo di "disegnare" l'aggiornamento visivo prima del blocco sincrono di Android.
                 setTimeout(async () => {
                     try {
                         deferredPrompt.prompt();
-                        
                         const { outcome } = await deferredPrompt.userChoice;
                         console.log('Risultato installazione utente:', outcome);
                         
@@ -205,6 +200,7 @@
                             progressContainer.style.display = 'none';
                             installBanner.style.display = 'flex'; 
                         }
+                        // Se accettato, l'evento 'appinstalled' prenderà il controllo visivo
                     } catch (e) {
                         console.error("Prompt error:", e);
                     }
@@ -215,7 +211,16 @@
 
         window.addEventListener('appinstalled', () => { 
             installBanner.style.display = 'none'; 
-            progressContainer.style.display = 'none';
+            
+            // FIX VISIVO: Mantiene la barra visibile durante la creazione dell'icona da parte di Android
+            progressContent.textContent = "✅ App installata! Creazione icona in corso...";
+            progressBarFill.style.background = "#10b981"; 
+            progressBarFill.classList.remove('pulse-install');
+            
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+            }, 6000); // 6 secondi di grazia prima di nascondersi dolcemente
+            
             deferredPrompt = null; 
             console.log("Installazione Android confermata. PWA attiva.");
         });
@@ -272,7 +277,7 @@
         
         let currentTargetInputId = null; 
         let isListening = false;
-        let isNetworkOverride = false; // Kill-switch per il ritorno di internet
+        let isNetworkOverride = false; 
 
         const statusUI = document.getElementById('vosk-status');
         const statusMsg = document.getElementById('vosk-msg');
@@ -307,11 +312,10 @@
                 isNetworkOverride = false;
                 let fakeProgress = 0;
                 
-                // Generatore di avanzamento fittizio con Watchdog di rete interno
                 progressInterval = setInterval(() => {
                     if (isNetworkOverride) {
                         clearInterval(progressInterval);
-                        return; // Se è tornata la rete, ferma l'intervallo silenziosamente
+                        return; 
                     }
                     if (fakeProgress < 99) fakeProgress += Math.floor(Math.random() * 10) + 2;
                     if (fakeProgress > 99) fakeProgress = 99;
@@ -319,16 +323,14 @@
                 }, 300);
 
                 // GARA A TEMPO (Timeout Sicurezza RAM Mobile):
-                // I browser mobile possono "congelare" WebAssembly senza lanciare errori
-                // Se la decompressione non finisce entro 25 secondi, sblocchiamo forzatamente.
+                // FIX VERO: Portato a 90 SECONDI. I dispositivi vecchi hanno bisogno di respiro per estrarre 45MB in RAM!
                 const modelPromise = window.Vosk.createModel(MODEL_URL);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly")), 25000));
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly")), 90000));
                 
                 voskModel = await Promise.race([modelPromise, timeoutPromise]);
                 
-                clearInterval(progressInterval); // Fermiamo il finto caricamento
+                clearInterval(progressInterval); 
 
-                // Se la rete è tornata mentre il telefono stava decomprimendo...
                 if (isNetworkOverride) {
                     try { 
                         if (typeof voskModel.terminate === 'function') voskModel.terminate();
@@ -346,6 +348,7 @@
                 console.error("Errore caricamento modello Vosk:", err);
                 
                 if (!isNetworkOverride) {
+                    // Errore reale solo se sfora i 90 secondi o se manca la memoria di sistema
                     showVoskStatus('Errore Modello. Spazio o RAM insufficienti.');
                     setTimeout(hideVoskStatus, 4000);
                 }
@@ -359,9 +362,8 @@
         window.addEventListener('offline', () => {
             clearTimeout(networkDebounceTimer);
             isNetworkOverride = false;
-            // Ritardo di 3 secondi per evitare caricamenti continui in caso di segnale instabile
             networkDebounceTimer = setTimeout(async () => {
-                if (voskModel || isListening) return; // Già caricato
+                if (voskModel || isListening) return; 
                 console.log("Rete persa stabilmente. Pre-caricamento modello Vosk in RAM...");
                 await initVoskModel();
             }, 3000); 
@@ -369,26 +371,22 @@
 
         window.addEventListener('online', () => {
             clearTimeout(networkDebounceTimer);
-            // Ritardo di 3 secondi per confermare che la rete sia stabile
             networkDebounceTimer = setTimeout(() => {
-                isNetworkOverride = true; // Kill-switch per interrompere initVoskModel e il suo Intervallo 99%
+                isNetworkOverride = true; 
                 
-                if (isListening) stopVoskListening(); // Ferma eventuali registrazioni in corso
+                if (isListening) stopVoskListening(); 
                 
                 if (voskModel) {
                     console.log("Rete ripristinata stabilmente. Distruzione modello Vosk per liberare RAM...");
                     try {
-                        // Il metodo standard per liberare i WebWorkers in vosk-browser
                         if (typeof voskModel.terminate === 'function') voskModel.terminate();
                         else if (typeof voskModel.delete === 'function') voskModel.delete();
                     } catch(e) { console.warn("Errore durante la distruzione del modello:", e); }
                     voskModel = null;
                 }
                 
-                // Forza sempre la rimozione del banner bloccato e mostra l'avviso di pulizia
                 showVoskStatus('🌐 Rete ripristinata. Memoria IA liberata.');
                 setTimeout(hideVoskStatus, 3500);
-                
             }, 3000);
         });
 
@@ -397,15 +395,12 @@
             if (isListening) return;
             currentTargetInputId = targetId;
             
-            // Se il Network Manager non ha fatto in tempo a caricarlo (es. utente clicca sùbito),
-            // viene caricato ora come paracadute.
             const modelLoaded = await initVoskModel();
             if (!modelLoaded || isNetworkOverride) {
                 sendVoskStopped();
                 return;
             }
 
-            // STRATEGIA 1: LA GARA A TEMPO (Timeout di sicurezza contro il coma silenzioso)
             let micReady = false;
             let safetyTimeout = setTimeout(() => {
                 if (!micReady) {
@@ -413,18 +408,16 @@
                     hideVoskStatus();
                     gestureOverlay.style.display = 'flex';
                 }
-            }, 1500); // 1.5 secondi di tolleranza
+            }, 1500); 
 
             try {
                 showVoskStatus('Richiesta microfono...');
                 
-                // Chiamata critica al sistema operativo
                 mediaStream = await navigator.mediaDevices.getUserMedia({
                     video: false,
                     audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 }
                 });
 
-                // Se arriviamo qui, il microfono si è acceso! Spegniamo la sveglia.
                 micReady = true;
                 clearTimeout(safetyTimeout);
                 gestureOverlay.style.display = 'none';
@@ -464,7 +457,7 @@
                 showVoskStatus('In ascolto offline...', true);
 
             } catch (err) {
-                micReady = true; // Ferma il timeout anche in caso di errore catchabile
+                micReady = true; 
                 clearTimeout(safetyTimeout);
                 console.error("Errore avvio microfono (Blocco di Sicurezza catchato):", err);
                 
@@ -497,7 +490,7 @@
         // --- GESTIONE EVENTI OVERLAY ---
         document.getElementById('vosk-gesture-btn').addEventListener('click', () => {
             if (currentTargetInputId) {
-                startVoskListening(currentTargetInputId, true); // Rilancia con tocco fisico = true
+                startVoskListening(currentTargetInputId, true); 
             }
         });
 
