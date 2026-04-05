@@ -19,20 +19,6 @@
             cursor: pointer; border: 2px solid white; white-space: nowrap;
         }
 
-        /* STRATEGIA 2: Banner Permesso Preventivo (Il Battesimo) */
-        #mic-permission-banner {
-            display: none; position: fixed; bottom: 95px; left: 50%; transform: translateX(-50%);
-            background: #f59e0b; color: white; padding: 14px 24px; border-radius: 50px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9998; font-weight: bold; font-size: 15px;
-            cursor: pointer; border: 2px solid white; white-space: nowrap; align-items: center; gap: 8px;
-            animation: pulse-orange 2s infinite;
-        }
-        @keyframes pulse-orange {
-            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-        }
-
         /* Barra di Progresso (STESSO DESIGN DEL PULSANTE) */
         #progress-container {
             display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
@@ -116,9 +102,6 @@
     <!-- Elementi di Installazione -->
     <div id="install-banner">📱 Installa l'App sul Telefono</div>
     
-    <!-- STRATEGIA 2: Banner "Battesimo" Permessi -->
-    <div id="mic-permission-banner">🎤 Abilita Microfono Offline</div>
-
     <!-- Barra di Download Intelligente -->
     <div id="progress-container">
         <div id="progress-bar-fill"></div>
@@ -130,51 +113,6 @@
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
         const MODEL_URL = './vosk-model-small-it-0.22.zip';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
-
-        // --- 0. STRATEGIA 2: GESTIONE PREVENTIVA PERMESSI (IL BATTESIMO) ---
-        const micBanner = document.getElementById('mic-permission-banner');
-
-        async function checkMicPermission() {
-            try {
-                const result = await navigator.permissions.query({ name: 'microphone' });
-                // Se il permesso non è stato ancora dato in modo permanente a GitHub, mostriamo il banner
-                if (result.state === 'prompt') {
-                    micBanner.style.display = 'flex';
-                } else {
-                    micBanner.style.display = 'none';
-                }
-                
-                // Ascoltatore live: se l'utente accetta dal banner, lo nascondiamo sùbito
-                result.onchange = function() {
-                    if (this.state === 'granted') micBanner.style.display = 'none';
-                };
-            } catch (e) {
-                // Fallback di sicurezza per vecchi browser
-                micBanner.style.display = 'flex';
-            }
-        }
-
-        micBanner.addEventListener('click', async () => {
-            try {
-                // Richiediamo l'accesso al microfono direttamente dal dominio padre (GitHub)
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                // Permesso ottenuto! Spegniamo immediatamente le tracce (non ci serve registrare ora)
-                stream.getTracks().forEach(track => track.stop());
-                
-                micBanner.style.display = 'none';
-                showVoskStatus('✅ Permesso salvato con successo!', false);
-                setTimeout(hideVoskStatus, 3000);
-            } catch (err) {
-                console.error("Permesso negato dall'utente:", err);
-                showVoskStatus('❌ Permesso negato. Serve per l\'uso offline.', false);
-                setTimeout(hideVoskStatus, 3000);
-            }
-        });
-
-        // Controlla i permessi all'avvio
-        window.addEventListener('load', checkMicPermission);
-
 
         // --- 1. REGISTRAZIONE SW E LOGICA DI INSTALLAZIONE ---
         if ('serviceWorker' in navigator) {
@@ -205,7 +143,20 @@
             progressContainer.onclick = null; 
             progressBarFill.classList.remove('pulse-install');
             progressBarFill.style.background = '#3b82f6';
+            progressBarFill.style.width = '5%';
 
+            // FASE 1: RICHIESTA PERMESSI MICROFONO PRE-DOWNLOAD
+            try {
+                progressContent.textContent = "Autorizza il microfono per l'uso offline...";
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // Permesso ottenuto! Spegniamo immediatamente le tracce
+                stream.getTracks().forEach(track => track.stop());
+            } catch (err) {
+                console.warn("Permesso microfono negato in fase di installazione:", err);
+                // Procediamo comunque con l'installazione, ma il Guscio farà scattare l'overlay nero se usato offline
+            }
+
+            // FASE 2: DOWNLOAD DEI FILE AI
             try {
                 progressContent.textContent = "Verifica requisiti offline...";
                 progressBarFill.style.width = '10%';
@@ -316,6 +267,7 @@
         
         let currentTargetInputId = null; 
         let isListening = false;
+        let isNetworkOverride = false; // Kill-switch per il ritorno di internet
 
         const statusUI = document.getElementById('vosk-status');
         const statusMsg = document.getElementById('vosk-msg');
@@ -346,13 +298,38 @@
         async function initVoskModel() {
             if (voskModel) return true;
             try {
-                showVoskStatus('Preparazione IA Offline (Gestione RAM)...');
+                isNetworkOverride = false;
+                let fakeProgress = 0;
+                
+                // Generatore di avanzamento fittizio per rassicurare l'utente durante l'allocazione RAM
+                const progressInterval = setInterval(() => {
+                    if (fakeProgress < 99) fakeProgress += Math.floor(Math.random() * 10) + 2;
+                    if (fakeProgress > 99) fakeProgress = 99;
+                    if (!isNetworkOverride) showVoskStatus(`Preparazione IA Offline: ${fakeProgress}%...`);
+                }, 300);
+
                 voskModel = await window.Vosk.createModel(MODEL_URL);
+                clearInterval(progressInterval);
+
+                // Se la rete è tornata mentre si stava caricando, annulliamo il successo visivo
+                if (isNetworkOverride) {
+                    try { 
+                        if (typeof voskModel.terminate === 'function') voskModel.terminate();
+                        else if (typeof voskModel.delete === 'function') voskModel.delete();
+                    } catch(e) {}
+                    voskModel = null;
+                    return false;
+                }
+
+                showVoskStatus('✅ Motore Vocale Offline Pronto all\'uso!', false);
+                setTimeout(hideVoskStatus, 3500);
                 return true;
             } catch (err) {
                 console.error("Errore caricamento modello Vosk:", err);
-                showVoskStatus('Errore Modello. Controlla lo spazio.');
-                setTimeout(hideVoskStatus, 3000);
+                if (!isNetworkOverride) {
+                    showVoskStatus('Errore Modello. Controlla lo spazio.');
+                    setTimeout(hideVoskStatus, 3000);
+                }
                 return false;
             }
         }
@@ -362,15 +339,12 @@
 
         window.addEventListener('offline', () => {
             clearTimeout(networkDebounceTimer);
+            isNetworkOverride = false;
             // Ritardo di 3 secondi per evitare caricamenti continui in caso di segnale instabile
             networkDebounceTimer = setTimeout(async () => {
                 if (voskModel || isListening) return; // Già caricato
                 console.log("Rete persa stabilmente. Pre-caricamento modello Vosk in RAM...");
-                const loaded = await initVoskModel();
-                if (loaded) {
-                    showVoskStatus('✅ Motore Vocale Offline Pronto all\'uso!');
-                    setTimeout(hideVoskStatus, 3500);
-                }
+                await initVoskModel();
             }, 3000); 
         });
 
@@ -378,6 +352,8 @@
             clearTimeout(networkDebounceTimer);
             // Ritardo di 3 secondi per confermare che la rete sia stabile
             networkDebounceTimer = setTimeout(() => {
+                isNetworkOverride = true; // Attiva il kill-switch per interrompere l'init se in corso
+                
                 if (isListening) stopVoskListening(); // Ferma eventuali registrazioni in corso
                 
                 if (voskModel) {
@@ -387,11 +363,13 @@
                         if (typeof voskModel.terminate === 'function') voskModel.terminate();
                         else if (typeof voskModel.delete === 'function') voskModel.delete();
                     } catch(e) { console.warn("Errore durante la distruzione del modello:", e); }
-                    
                     voskModel = null;
-                    showVoskStatus('🌐 Rete ripristinata. Memoria IA liberata.');
-                    setTimeout(hideVoskStatus, 3500);
                 }
+                
+                // Forza sempre la rimozione del banner bloccato e mostra l'avviso di pulizia
+                showVoskStatus('🌐 Rete ripristinata. Memoria IA liberata.');
+                setTimeout(hideVoskStatus, 3500);
+                
             }, 3000);
         });
 
@@ -403,7 +381,7 @@
             // Se il Network Manager non ha fatto in tempo a caricarlo (es. utente clicca sùbito),
             // viene caricato ora come paracadute.
             const modelLoaded = await initVoskModel();
-            if (!modelLoaded) {
+            if (!modelLoaded || isNetworkOverride) {
                 sendVoskStopped();
                 return;
             }
