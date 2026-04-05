@@ -19,22 +19,26 @@
             cursor: pointer; border: 2px solid white; white-space: nowrap;
         }
 
-        /* Nuova Barra di Progresso Download AI */
+        /* Nuova Barra di Progresso (STESSO DESIGN DEL PULSANTE) */
         #progress-container {
             display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: white; color: #333; padding: 15px 25px; border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; width: 85%; max-width: 350px;
-            font-family: Arial, sans-serif; border: 2px solid #2563eb;
+            background: #1e3a8a; /* Blu scuro (sfondo traccia) */
+            color: white; border-radius: 50px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; 
+            width: 85%; max-width: 350px; border: 2px solid white;
+            overflow: hidden; /* Mantiene l'effetto smussato sulla barra interna */
         }
-        #progress-text {
-            font-size: 13px; font-weight: bold; margin-bottom: 10px; text-align: center; color: #2563eb;
-            word-wrap: break-word; 
-        }
-        #progress-bar-bg {
-            width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden;
-        }
+        
         #progress-bar-fill {
-            height: 100%; width: 0%; background: #2563eb; transition: width 0.2s ease-out;
+            position: absolute; top: 0; left: 0; height: 100%; width: 0%; 
+            background: #3b82f6; /* Azzurro (colore progresso) */
+            transition: width 0.2s ease-out; z-index: 1;
+        }
+        
+        #progress-content {
+            position: relative; z-index: 2; padding: 14px 28px; text-align: center; 
+            font-weight: bold; font-size: 14px; white-space: nowrap;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
         }
         
         /* Banner di stato per Vosk */
@@ -85,10 +89,10 @@
     <!-- Elementi di Installazione -->
     <div id="install-banner">📱 Installa l'App sul Telefono</div>
     
-    <!-- Barra di Download Intelligente -->
+    <!-- Barra di Download Intelligente (Fusa col pulsante) -->
     <div id="progress-container">
-        <div id="progress-text">Preparazione download AI...</div>
-        <div id="progress-bar-bg"><div id="progress-bar-fill"></div></div>
+        <div id="progress-bar-fill"></div>
+        <div id="progress-content">Preparazione download AI...</div>
     </div>
 
     <script>
@@ -110,7 +114,7 @@
         let deferredPrompt;
         const installBanner = document.getElementById('install-banner');
         const progressContainer = document.getElementById('progress-container');
-        const progressText = document.getElementById('progress-text');
+        const progressContent = document.getElementById('progress-content');
         const progressBarFill = document.getElementById('progress-bar-fill');
 
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -119,33 +123,31 @@
             installBanner.style.display = 'flex';
         });
 
-        // La Magia della Barra di Progresso (REFACTOR XHR per bypass Fetch/CORS crash)
+        // La Magia della Barra di Progresso Unificata
         installBanner.addEventListener('click', async () => {
             installBanner.style.display = 'none';
             progressContainer.style.display = 'block';
 
             try {
-                progressText.textContent = "Verifica requisiti offline...";
+                progressContent.textContent = "Verifica requisiti offline...";
                 progressBarFill.style.width = '10%';
 
-                // 1. Scarichiamo il Modello Italiano tramite XHR Nativo
-                await downloadWithProgressXHR(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
+                // 1. Scarichiamo il Modello Italiano tramite Fetch Sicuro
+                await downloadWithProgress(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
 
                 // 2. Scarichiamo il Motore Javascript
-                progressText.textContent = "Download Motore Vocale JS...";
+                progressContent.textContent = "Download Motore Vocale JS...";
                 progressBarFill.style.width = '90%';
-                await downloadWithoutProgressXHR(JS_ENGINE_URL, VOSK_CACHE_NAME);
+                await downloadWithoutProgress(JS_ENGINE_URL, VOSK_CACHE_NAME);
 
                 // Download completati!
-                progressText.textContent = "Tutto pronto! Avvio Installazione...";
+                progressContent.textContent = "Tutto pronto! Installo...";
                 progressBarFill.style.width = '100%';
 
             } catch (err) {
-                console.warn("Download forzato fallito, procedo comunque con l'installazione:", err);
-                // SISTEMA ANTI-BLOCCO: Se il download fallisce, l'app si installa comunque!
-                progressText.textContent = "Download rinviato. Procedo...";
-                progressText.style.color = "#f59e0b"; // Arancione
-                progressBarFill.style.background = "#f59e0b";
+                console.error("Download forzato fallito:", err);
+                progressContent.textContent = "Avvio installazione base...";
+                progressBarFill.style.background = "#f59e0b"; // Arancione di avviso
                 progressBarFill.style.width = '100%';
             }
 
@@ -162,7 +164,7 @@
                     deferredPrompt = null;
                 }
                 progressContainer.style.display = 'none';
-            }, 1500);
+            }, 1200);
         });
 
         window.addEventListener('appinstalled', () => { 
@@ -171,80 +173,55 @@
             deferredPrompt = null; 
         });
 
-        // FUNZIONE: XHR Robusta con salvataggio sicuro e bypass SW
-        function downloadWithProgressXHR(url, cacheName, itemName, startPct, endPct) {
-            return new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                // Aggiungiamo un timestamp per BYPASSARE il Service Worker ed evitare conflitti
-                const bypassUrl = url + '?bypass_sw=' + Date.now();
-                xhr.open('GET', bypassUrl, true);
-                xhr.responseType = 'blob'; 
+        // FUNZIONE: Fetch robusto con stream sbloccato
+        async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
+            // Un semplice fetch senza trucchi strani che bloccano i CDN
+            const response = await fetch(url);
+            
+            if (!response.ok) throw new Error(`Codice errore server: ${response.status}`);
+            
+            // Creiamo un clone ESATTO della risposta per passarlo al Service Worker
+            // Questo ci permette di leggere lo stream a schermo senza che la Cache ci blocchi
+            const responseClone = response.clone();
+            caches.open(cacheName).then(cache => cache.put(url, responseClone));
+
+            // Misuriamo il file (Se il server non lo dice, forziamo ~45MB come stima per la barra)
+            const contentLength = response.headers.get('content-length');
+            const total = contentLength ? parseInt(contentLength, 10) : 47600000; 
+            
+            if (!response.body) {
+                progressBarFill.style.width = `${endPct}%`;
+                return;
+            }
+
+            // Leggiamo lo stream dinamicamente per muovere la barra
+            let loaded = 0;
+            const reader = response.body.getReader();
+            
+            while(true) {
+                const {done, value} = await reader.read();
+                if (done) break;
                 
-                xhr.onprogress = function(event) {
-                    if (event.lengthComputable) {
-                        const progress = event.loaded / event.total;
-                        const currentPct = startPct + (progress * (endPct - startPct));
-                        
-                        const mbLoaded = (event.loaded / (1024*1024)).toFixed(1);
-                        const mbTotal = (event.total / (1024*1024)).toFixed(1);
-                        
-                        progressText.textContent = `Download ${itemName} (${mbLoaded} MB / ${mbTotal} MB)...`;
-                        progressBarFill.style.width = `${currentPct}%`;
-                    }
-                };
+                loaded += value.byteLength;
                 
-                xhr.onload = async function() {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            const cache = await caches.open(cacheName);
-                            const response = new Response(xhr.response, {
-                                headers: {
-                                    'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/zip',
-                                    'Content-Length': xhr.response.size
-                                }
-                            });
-                            // IMPORTANTE: Mettiamo in cache usando l'URL ORIGINALE pulito!
-                            await cache.put(url, response);
-                            progressBarFill.style.width = `${endPct}%`;
-                            resolve();
-                        } catch (err) {
-                            reject(new Error("Errore salvataggio Cache"));
-                        }
-                    } else {
-                        reject(new Error(`Errore Server: ${xhr.status}`));
-                    }
-                };
+                let progress = loaded / total;
+                if (progress > 1) progress = 1; // Evita di superare il 100% se la stima era errata
                 
-                xhr.onerror = function() {
-                    reject(new Error("Failed to fetch (CORS o Blocco di Sicurezza)"));
-                };
+                const currentPct = startPct + (progress * (endPct - startPct));
+                const mbLoaded = (loaded / (1024*1024)).toFixed(1);
+                const mbTotal = (total / (1024*1024)).toFixed(1);
                 
-                xhr.send();
-            });
+                progressContent.textContent = `${itemName} (${mbLoaded} / ${mbTotal} MB)...`;
+                progressBarFill.style.width = `${currentPct}%`;
+            }
         }
 
-        // FUNZIONE: XHR silenziosa per file JS piccoli
-        function downloadWithoutProgressXHR(url, cacheName) {
-            return new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                const bypassUrl = url + '?bypass_sw=' + Date.now();
-                xhr.open('GET', bypassUrl, true);
-                xhr.responseType = 'blob';
-                xhr.onload = async function() {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        const cache = await caches.open(cacheName);
-                        const response = new Response(xhr.response, {
-                            headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/javascript' }
-                        });
-                        await cache.put(url, response);
-                        resolve();
-                    } else {
-                        reject(new Error(`Errore Server JS: ${xhr.status}`));
-                    }
-                };
-                xhr.onerror = () => reject(new Error("Failed to fetch JS"));
-                xhr.send();
-            });
+        // FUNZIONE: Fetch silenziosa per file JS piccoli
+        async function downloadWithoutProgress(url, cacheName) {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Errore JS: ${response.status}`);
+            const cache = await caches.open(cacheName);
+            await cache.put(url, response);
         }
 
         // --- 2. MOTORE VOSK OFFLINE ---
