@@ -98,7 +98,8 @@
     <script>
         // COSTANTI DEI FILE DA SCARICARE FORZATAMENTE
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
-        const MODEL_URL = 'https://models.alphacephei.com/vosk-model-small-it-0.4.zip';
+        // ORA PUNTIAMO AL FILE LOCALE SU GITHUB! Addio blocchi CORS.
+        const MODEL_URL = './vosk-model-small-it-0.22.zip';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
 
         // --- 1. REGISTRAZIONE SW E LOGICA DI INSTALLAZIONE ---
@@ -132,7 +133,7 @@
                 progressContent.textContent = "Verifica requisiti offline...";
                 progressBarFill.style.width = '10%';
 
-                // 1. Scarichiamo il Modello Italiano tramite Fetch Sicuro
+                // 1. Scarichiamo il Modello Italiano tramite Fetch Sicuro (Ora è Locale!)
                 await downloadWithProgress(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
 
                 // 2. Scarichiamo il Motore Javascript
@@ -175,19 +176,18 @@
 
         // FUNZIONE: Fetch robusto con stream sbloccato
         async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
-            // Un semplice fetch senza trucchi strani che bloccano i CDN
+            // Un semplice fetch locale senza trucchi strani
             const response = await fetch(url);
             
             if (!response.ok) throw new Error(`Codice errore server: ${response.status}`);
             
             // Creiamo un clone ESATTO della risposta per passarlo al Service Worker
-            // Questo ci permette di leggere lo stream a schermo senza che la Cache ci blocchi
             const responseClone = response.clone();
             caches.open(cacheName).then(cache => cache.put(url, responseClone));
 
-            // Misuriamo il file (Se il server non lo dice, forziamo ~45MB come stima per la barra)
+            // Misuriamo il file dal Content-Length (ora che è locale, il server GitHub ce lo dirà sicuramente)
             const contentLength = response.headers.get('content-length');
-            const total = contentLength ? parseInt(contentLength, 10) : 47600000; 
+            const total = contentLength ? parseInt(contentLength, 10) : 50000000; // Stima di 50MB se mancante
             
             if (!response.body) {
                 progressBarFill.style.width = `${endPct}%`;
