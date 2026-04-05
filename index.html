@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Gestione Zone</title>
+    <!-- Colleghiamo il Manifest per farla diventare una vera App -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#4a90e2">
     <style>
@@ -26,16 +27,40 @@
         }
         .pulse-dot { width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+
+        /* BYPASS DI SICUREZZA ANDROID: Overlay per Tocco Diretto */
+        #vosk-gesture-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 100000;
+            flex-direction: column; align-items: center; justify-content: center; color: white;
+            backdrop-filter: blur(3px);
+        }
+        .gesture-btn {
+            background: #ef4444; border: 4px solid white; border-radius: 50%;
+            width: 100px; height: 100px; font-size: 40px; display: flex;
+            align-items: center; justify-content: center; margin-bottom: 20px;
+            animation: pulse 1.5s infinite; cursor: pointer; box-shadow: 0 10px 25px rgba(239, 68, 68, 0.5);
+        }
     </style>
     
     <!-- Importiamo la libreria ufficiale di Vosk per il Browser -->
     <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
 </head>
 <body>
+    <!-- Overlay Bypass Sicurezza -->
+    <div id="vosk-gesture-overlay">
+        <div class="gesture-btn" id="vosk-gesture-btn">🎤</div>
+        <h2 style="margin:0; text-align:center;">Tocca per Avviare</h2>
+        <p style="color: #ccc; text-align: center; padding: 0 30px; font-size:14px; margin-top:10px;">
+            Il dispositivo richiede un tocco diretto qui<br>per autorizzare il microfono offline.
+        </p>
+        <button id="vosk-gesture-cancel" style="margin-top:40px; padding:12px 25px; background:#444; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">Annulla</button>
+    </div>
+
     <!-- Il popup di stato di Vosk -->
     <div id="vosk-status"><span class="pulse-dot" id="vosk-dot"></span><span id="vosk-msg">Inizializzazione Motore Offline...</span></div>
 
-    <!-- Il tuo gestionale. SOSTITUISCI IL LINK QUI SOTTO CON QUELLO REALE -->
+    <!-- Il tuo gestionale App Script -->
     <iframe id="gas-frame" src="https://script.google.com/macros/s/AKfycbyQ9vr71henXHbr6QXDlE9N-We26aoAodf6mm_Rsue9dQVbPBEfjbAlIQ2J8FYdqMDTmA/exec" allow="microphone"></iframe>
 
     <div id="install-banner">📱 Installa l'App sul Telefono</div>
@@ -43,22 +68,18 @@
     <script>
         // --- 1. REGISTRAZIONE PWA CON PROTEZIONE PROTOCOLLO ---
         if ('serviceWorker' in navigator) {
-            // Verifichiamo che il protocollo sia supportato (http o https) per evitare errori in anteprima blob
             const isSupportedProtocol = window.location.protocol === 'http:' || window.location.protocol === 'https:';
-            
             if (isSupportedProtocol) {
                 navigator.serviceWorker.register('sw.js')
                 .then(() => console.log('Service Worker registrato con successo!'))
                 .catch(err => console.error('Errore SW:', err));
-            } else {
-                console.warn('Service Worker non registrato: protocollo non supportato (Anteprima). Funzionerà su GitHub Pages.');
             }
         }
 
         let deferredPrompt;
         const installBanner = document.getElementById('install-banner');
         window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault(); deferredPrompt = e; installBanner.style.display = 'block';
+            e.preventDefault(); deferredPrompt = e; installBanner.style.display = 'flex';
         });
         installBanner.addEventListener('click', async () => {
             installBanner.style.display = 'none';
@@ -73,17 +94,19 @@
         let mediaStream = null;
         let source = null;
         let processor = null;
-        let currentTargetInputId = null; // Memorizza chi ha chiesto l'ascolto
+        
+        let currentTargetInputId = null; 
         let isListening = false;
 
         const statusUI = document.getElementById('vosk-status');
         const statusMsg = document.getElementById('vosk-msg');
         const statusDot = document.getElementById('vosk-dot');
+        const gestureOverlay = document.getElementById('vosk-gesture-overlay');
 
         function showVoskStatus(msg, isRecording = false) {
             statusUI.style.display = 'flex';
             statusMsg.textContent = msg;
-            statusDot.style.backgroundColor = isRecording ? '#ef4444' : '#f59e0b'; // Rosso se ascolta, Arancio se carica
+            statusDot.style.backgroundColor = isRecording ? '#ef4444' : '#f59e0b';
             statusDot.style.animation = isRecording ? 'pulse 1.5s infinite' : 'none';
         }
 
@@ -91,15 +114,18 @@
             statusUI.style.display = 'none';
         }
 
-        // Funzione per caricare il modello (pesa 45MB, la prima volta ci mette un po', poi è istantaneo dalla cache)
+        function sendVoskStopped() {
+            document.getElementById('gas-frame').contentWindow.postMessage({
+                type: 'VOSK_STOPPED',
+                targetId: currentTargetInputId
+            }, '*');
+        }
+
         async function initVoskModel() {
             if (voskModel) return true;
             try {
-                showVoskStatus('Download modello lingua Italiana (solo prima volta)...');
-                // Link ufficiale del modello small in italiano compresso
+                showVoskStatus('Download modello lingua (solo prima volta)...');
                 const modelUrl = 'https://models.alphacephei.com/vosk-model-small-it-0.4.zip';
-                
-                // Creiamo il modello. Il service worker intercetterà questa chiamata e la salvererà!
                 voskModel = await window.Vosk.createModel(modelUrl);
                 return true;
             } catch (err) {
@@ -110,48 +136,55 @@
             }
         }
 
-        async function startVoskListening(targetId) {
+        // Funzione Principale di Avvio
+        async function startVoskListening(targetId, isDirectGesture = false) {
             if (isListening) return;
             currentTargetInputId = targetId;
             
             const modelLoaded = await initVoskModel();
-            if (!modelLoaded) return;
+            if (!modelLoaded) {
+                sendVoskStopped();
+                return;
+            }
 
             try {
                 showVoskStatus('Richiesta microfono...');
+                
+                // Tenta l'accesso al microfono
                 mediaStream = await navigator.mediaDevices.getUserMedia({
                     video: false,
                     audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 }
                 });
 
-                audioContext = new AudioContext();
+                // Se riesce, nasconde immediatamente l'overlay qualora fosse aperto
+                gestureOverlay.style.display = 'none';
+
+                // Inizializza l'AudioContext (Forzando il resume per Safari/iOS/Android restrizioni)
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioContextClass();
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
                 source = audioContext.createMediaStreamSource(mediaStream);
-                
-                // Creiamo il riconoscitore
                 recognizer = new voskModel.KaldiRecognizer(audioContext.sampleRate);
                 
                 recognizer.on("result", (message) => {
                     const text = message.result.text;
                     if (text && text.trim().length > 0) {
-                        // Spediamo il risultato finale dentro l'Iframe di Google Apps Script!
                         document.getElementById('gas-frame').contentWindow.postMessage({
                             type: 'VOSK_RESULT',
                             text: text,
                             targetId: currentTargetInputId
                         }, '*');
-                        stopVoskListening(); // Ferma l'ascolto dopo una frase conclusa
+                        stopVoskListening(); 
                     }
                 });
 
-                recognizer.on("partialresult", (message) => {
-                    // (Opzionale) Potremmo inviare i risultati parziali mentre l'utente parla
-                });
-
-                // Creiamo il nodo che passa l'audio dal microfono a Vosk
                 processor = audioContext.createScriptProcessor(4096, 1, 1);
                 processor.onaudioprocess = (event) => {
                     try {
-                        recognizer.acceptWaveform(event.inputBuffer);
+                        if(recognizer) recognizer.acceptWaveform(event.inputBuffer);
                     } catch (error) { console.error('Audio Process Error', error); }
                 };
 
@@ -162,9 +195,19 @@
                 showVoskStatus('In ascolto offline...', true);
 
             } catch (err) {
-                console.error("Errore avvio microfono:", err);
-                showVoskStatus('Permesso Microfono Negato.');
-                setTimeout(hideVoskStatus, 3000);
+                console.error("Errore avvio microfono (Blocco di Sicurezza):", err);
+                
+                // Se il browser ha bloccato in background, chiamiamo in soccorso l'utente
+                if (!isDirectGesture) {
+                    hideVoskStatus();
+                    gestureOverlay.style.display = 'flex'; // Mostra il tastone
+                } else {
+                    // Se fallisce anche col tocco diretto, è un problema hardware o permessi revocati
+                    gestureOverlay.style.display = 'none';
+                    showVoskStatus('Permesso Microfono Negato dal Sistema.');
+                    setTimeout(hideVoskStatus, 3000);
+                    sendVoskStopped();
+                }
             }
         }
 
@@ -179,25 +222,26 @@
             if (recognizer) { recognizer.remove(); recognizer = null; }
             
             hideVoskStatus();
-            
-            // Diciamo a Google che abbiamo spento il microfono
-            document.getElementById('gas-frame').contentWindow.postMessage({
-                type: 'VOSK_STOPPED',
-                targetId: currentTargetInputId
-            }, '*');
+            sendVoskStopped();
         }
 
+        // --- GESTIONE EVENTI OVERLAY ---
+        document.getElementById('vosk-gesture-btn').addEventListener('click', () => {
+            if (currentTargetInputId) {
+                startVoskListening(currentTargetInputId, true); // true = è un tocco fisico!
+            }
+        });
+
+        document.getElementById('vosk-gesture-cancel').addEventListener('click', () => {
+            gestureOverlay.style.display = 'none';
+            sendVoskStopped(); // Spegne il pallino rosso sul gestionale
+        });
+
         // --- 3. IL RICEVITORE DAL GESTIONALE ---
-        // Ascoltiamo i comandi che arrivano dall'Iframe (Google Apps Script)
         window.addEventListener('message', (event) => {
-            // Ignoriamo messaggi non formattati correttamente
             if (!event.data || !event.data.action) return;
-
-            console.log("Messaggio ricevuto dal Gestionale:", event.data.action);
-
             if (event.data.action === 'START_VOSK') {
-                // Il gestionale ci ha chiesto di avviare la dettatura!
-                startVoskListening(event.data.targetId);
+                startVoskListening(event.data.targetId, false);
             } 
             else if (event.data.action === 'STOP_VOSK') {
                 stopVoskListening();
