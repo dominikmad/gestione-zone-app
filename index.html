@@ -112,7 +112,6 @@
         // COSTANTI DEI FILE
         const VOSK_CACHE_NAME = 'vosk-cache-v1';
         
-        // ATTENZIONE: HO CAMBIATO L'ESTENSIONE IN .tar.gz (Vedi analisi sotto)
         const MODEL_URL = './vosk-model-small-it-0.22.tar.gz';
         const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
 
@@ -187,7 +186,6 @@
                 progressContainer.classList.remove('ready-to-install');
                 progressContainer.onclick = null;
 
-                // Testo modificato come richiesto
                 progressContent.textContent = "Installazione in corso...";
                 progressBarFill.style.background = "#10b981"; 
                 progressBarFill.classList.add('pulse-install'); 
@@ -213,7 +211,6 @@
         window.addEventListener('appinstalled', () => { 
             installBanner.style.display = 'none'; 
             
-            // FIX TESTO COME RICHIESTO DALL'UTENTE
             progressContent.textContent = "Installazione in corso...";
             progressBarFill.style.background = "#10b981"; 
             progressBarFill.classList.add('pulse-install');
@@ -310,10 +307,25 @@
         async function initVoskModel() {
             if (voskModel) return true;
             let progressInterval;
+            let blobUrl = null; // Tracciamo il Blob per la pulizia della RAM
+            
             try {
                 isNetworkOverride = false;
-                let fakeProgress = 0;
+
+                // ---------------------------------------------------------
+                // BYPASS ARCHITETTURALE: FETCH MANUALE IN RAM (BLOB INJECTION)
+                // ---------------------------------------------------------
+                showVoskStatus('Caricamento pacchetto IA in RAM...');
                 
+                // Effettuiamo la lettura file a mano dal Main Thread (Bypassa il deadlock del Worker)
+                const fileResponse = await fetch(MODEL_URL);
+                if (!fileResponse.ok) throw new Error("Pacchetto .tar.gz non trovato o irraggiungibile.");
+                
+                // Creiamo l'oggetto di Memoria Pura
+                const blob = await fileResponse.blob();
+                blobUrl = URL.createObjectURL(blob); 
+                
+                let fakeProgress = 0;
                 progressInterval = setInterval(() => {
                     if (isNetworkOverride) {
                         clearInterval(progressInterval);
@@ -321,15 +333,17 @@
                     }
                     if (fakeProgress < 99) fakeProgress += Math.floor(Math.random() * 10) + 2;
                     if (fakeProgress > 99) fakeProgress = 99;
-                    showVoskStatus(`Preparazione IA Offline: ${fakeProgress}%...`);
+                    showVoskStatus(`Decompressione Motore: ${fakeProgress}%...`);
                 }, 300);
 
-                const modelPromise = window.Vosk.createModel(MODEL_URL);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout di 90s raggiunto.")), 90000));
+                // Passiamo l'URL della Memoria RAM (blobUrl) a Vosk, NON l'url di rete
+                const modelPromise = window.Vosk.createModel(blobUrl);
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly")), 90000));
                 
                 voskModel = await Promise.race([modelPromise, timeoutPromise]);
                 
                 clearInterval(progressInterval); 
+                if (blobUrl) URL.revokeObjectURL(blobUrl); // Pulizia istantanea per non intasare la RAM
 
                 if (isNetworkOverride) {
                     try { 
@@ -345,6 +359,8 @@
                 return true;
             } catch (err) {
                 if (progressInterval) clearInterval(progressInterval);
+                if (blobUrl) URL.revokeObjectURL(blobUrl); // Pulizia in caso di errore
+                
                 console.error("Errore caricamento modello Vosk:", err);
                 
                 if (!isNetworkOverride) {
