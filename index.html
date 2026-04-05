@@ -178,56 +178,73 @@
 
         // FUNZIONE: Fetch con salvataggio sicuro e misurazione
         async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
-            // Aggiungiamo cache: 'reload' per ignorare vecchie versioni rotte
-            const request = new Request(url, { cache: 'reload' });
-            const response = await fetch(request);
+            // FIX: Rimosso cache: 'reload' che causava il blocco CORS "Failed to fetch"
+            const response = await fetch(url);
             
             if (!response.ok) throw new Error(`Codice errore server: ${response.status}`);
             
-            const cache = await caches.open(cacheName);
-            
-            // PRECAUZIONE ESTREMA: Mettiamo SUBITO in cache il clone in background, 
-            // così non entra in conflitto con la lettura del reader
-            const cloneToCache = response.clone();
-            await cache.put(request, cloneToCache);
-
             const contentLength = response.headers.get('content-length');
             
-            // Se non c'è il content-length (Server non supporta stream), nascondiamo solo l'avanzamento visivo
+            // Se non c'è il content-length (Server non supporta stream), fallback standard
             if (!contentLength || !response.body) {
                 console.log("Stream reader non supportato, file salvato comunque.");
+                const cache = await caches.open(cacheName);
+                await cache.put(url, response.clone());
                 progressBarFill.style.width = `${endPct}%`;
                 return;
             }
 
-            // Leggiamo lo stream solo per muovere la barra visiva
+            // Leggiamo lo stream dinamicamente E lo passiamo alla cache
             const total = parseInt(contentLength, 10);
             let loaded = 0;
             const reader = response.body.getReader();
             
-            while(true) {
-                const {done, value} = await reader.read();
-                if (done) break;
-                loaded += value.byteLength;
-                
-                const progress = loaded / total;
-                const currentPct = startPct + (progress * (endPct - startPct));
-                
-                const mbLoaded = (loaded / (1024*1024)).toFixed(1);
-                const mbTotal = (total / (1024*1024)).toFixed(1);
-                
-                progressText.textContent = `Download ${itemName} (${mbLoaded} MB / ${mbTotal} MB)...`;
-                progressBarFill.style.width = `${currentPct}%`;
-            }
+            const stream = new ReadableStream({
+                start(controller) {
+                    function push() {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                controller.close();
+                                return;
+                            }
+                            loaded += value.byteLength;
+                            const progress = loaded / total;
+                            const currentPct = startPct + (progress * (endPct - startPct));
+                            
+                            const mbLoaded = (loaded / (1024*1024)).toFixed(1);
+                            const mbTotal = (total / (1024*1024)).toFixed(1);
+                            
+                            progressText.textContent = `Download ${itemName} (${mbLoaded} MB / ${mbTotal} MB)...`;
+                            progressBarFill.style.width = `${currentPct}%`;
+                            
+                            controller.enqueue(value);
+                            push();
+                        }).catch(err => {
+                            console.error("Errore stream", err);
+                            controller.error(err);
+                        });
+                    }
+                    push();
+                }
+            });
+
+            const newResponse = new Response(stream, {
+                headers: response.headers,
+                status: response.status,
+                statusText: response.statusText
+            });
+
+            const cache = await caches.open(cacheName);
+            // Il put in cache "consumerà" il nuovo stream, attivando la barra in tempo reale
+            await cache.put(url, newResponse); 
         }
 
         // FUNZIONE: Fetch silenziosa senza misurazione (Motore JS)
         async function downloadWithoutProgress(url, cacheName) {
-            const request = new Request(url, { cache: 'reload' });
-            const response = await fetch(request);
+            const response = await fetch(url); // FIX: Rimosso cache: 'reload'
             if (!response.ok) throw new Error(`Codice errore server JS: ${response.status}`);
             const cache = await caches.open(cacheName);
-            await cache.put(request, response.clone());
+            await cache.put(url, response.clone());
         }
 
         // --- 2. MOTORE VOSK OFFLINE ---
