@@ -11,11 +11,29 @@
         body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #f0f2f5; font-family: Arial, sans-serif; }
         iframe { width: 100%; height: 100%; border: none; display: block; }
         
+        /* Banner Installazione Classico */
         #install-banner {
             display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
             background: #2563eb; color: white; padding: 14px 28px; border-radius: 50px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; font-weight: bold; font-size: 16px;
             cursor: pointer; border: 2px solid white; white-space: nowrap;
+        }
+
+        /* Nuova Barra di Progresso Download AI */
+        #progress-container {
+            display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: white; color: #333; padding: 15px 25px; border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; width: 85%; max-width: 350px;
+            font-family: Arial, sans-serif; border: 2px solid #2563eb;
+        }
+        #progress-text {
+            font-size: 13px; font-weight: bold; margin-bottom: 10px; text-align: center; color: #2563eb;
+        }
+        #progress-bar-bg {
+            width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden;
+        }
+        #progress-bar-fill {
+            height: 100%; width: 0%; background: #2563eb; transition: width 0.2s ease-out;
         }
         
         /* Banner di stato per Vosk (Caricamento e Ascolto) */
@@ -43,7 +61,7 @@
         }
     </style>
     
-    <!-- Importiamo la libreria ufficiale di Vosk per il Browser -->
+    <!-- Importiamo la libreria ufficiale di Vosk per il Browser (Verrà cachata dall'installazione) -->
     <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
 </head>
 <body>
@@ -57,35 +75,171 @@
         <button id="vosk-gesture-cancel" style="margin-top:40px; padding:12px 25px; background:#444; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">Annulla</button>
     </div>
 
-    <!-- Il popup di stato di Vosk -->
-    <div id="vosk-status"><span class="pulse-dot" id="vosk-dot"></span><span id="vosk-msg">Inizializzazione Motore Offline...</span></div>
+    <!-- Popup di stato di Vosk -->
+    <div id="vosk-status"><span class="pulse-dot" id="vosk-dot"></span><span id="vosk-msg">Inizializzazione Motore...</span></div>
 
     <!-- Il tuo gestionale App Script -->
     <iframe id="gas-frame" src="https://script.google.com/macros/s/AKfycbyQ9vr71henXHbr6QXDlE9N-We26aoAodf6mm_Rsue9dQVbPBEfjbAlIQ2J8FYdqMDTmA/exec" allow="microphone"></iframe>
 
+    <!-- Elementi di Installazione -->
     <div id="install-banner">📱 Installa l'App sul Telefono</div>
+    
+    <!-- Barra di Download Intelligente -->
+    <div id="progress-container">
+        <div id="progress-text">Preparazione download AI...</div>
+        <div id="progress-bar-bg"><div id="progress-bar-fill"></div></div>
+    </div>
 
     <script>
-        // --- 1. REGISTRAZIONE PWA CON PROTEZIONE PROTOCOLLO ---
+        // COSTANTI DEI FILE DA SCARICARE FORZATAMENTE
+        const VOSK_CACHE_NAME = 'vosk-cache-v1';
+        const MODEL_URL = 'https://models.alphacephei.com/vosk-model-small-it-0.4.zip';
+        const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
+
+        // --- 1. REGISTRAZIONE SW E LOGICA DI INSTALLAZIONE ---
         if ('serviceWorker' in navigator) {
             const isSupportedProtocol = window.location.protocol === 'http:' || window.location.protocol === 'https:';
             if (isSupportedProtocol) {
                 navigator.serviceWorker.register('sw.js')
-                .then(() => console.log('Service Worker registrato con successo!'))
+                .then(() => console.log('Service Worker registrato!'))
                 .catch(err => console.error('Errore SW:', err));
             }
         }
 
         let deferredPrompt;
         const installBanner = document.getElementById('install-banner');
+        const progressContainer = document.getElementById('progress-container');
+        const progressText = document.getElementById('progress-text');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+
         window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault(); deferredPrompt = e; installBanner.style.display = 'flex';
+            e.preventDefault(); 
+            deferredPrompt = e; 
+            installBanner.style.display = 'flex';
         });
+
+        // La Magia della Barra di Progresso
         installBanner.addEventListener('click', async () => {
             installBanner.style.display = 'none';
-            if (deferredPrompt) { await deferredPrompt.prompt(); deferredPrompt = null; }
+            progressContainer.style.display = 'block';
+
+            try {
+                progressText.textContent = "Verifica requisiti offline...";
+                progressBarFill.style.width = '10%';
+
+                // 1. Scarichiamo il Modello Italiano con misurazione in tempo reale
+                await downloadWithProgress(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
+
+                // 2. Scarichiamo il Motore Javascript in background (Veloce, diamo il 20% finale)
+                progressText.textContent = "Download Motore Vocale JS...";
+                progressBarFill.style.width = '90%';
+                await downloadWithoutProgress(JS_ENGINE_URL, VOSK_CACHE_NAME);
+
+                // Download completati!
+                progressText.textContent = "Tutto pronto! Avvio Installazione...";
+                progressBarFill.style.width = '100%';
+
+                // Aspettiamo un istante per far vedere il 100% all'utente
+                setTimeout(async () => {
+                    if (deferredPrompt) {
+                        deferredPrompt.prompt();
+                        const { outcome } = await deferredPrompt.userChoice;
+                        console.log('Risultato installazione:', outcome);
+                        deferredPrompt = null;
+                        
+                        // Nascondiamo la barra
+                        progressContainer.style.display = 'none';
+                    }
+                }, 800);
+
+            } catch (err) {
+                console.error("Errore durante il download forzato:", err);
+                progressText.textContent = "Errore di Rete. Riprova più tardi.";
+                progressText.style.color = "red";
+                progressBarFill.style.background = "red";
+                
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    installBanner.style.display = 'flex';
+                    progressText.style.color = "#2563eb";
+                    progressBarFill.style.background = "#2563eb";
+                    progressBarFill.style.width = '0%';
+                }, 4000);
+            }
         });
-        window.addEventListener('appinstalled', () => { installBanner.style.display = 'none'; deferredPrompt = null; });
+
+        window.addEventListener('appinstalled', () => { 
+            installBanner.style.display = 'none'; 
+            progressContainer.style.display = 'none';
+            deferredPrompt = null; 
+        });
+
+        // FUNZIONE: Fetch con misurazione dei Byte per la Barra (Modello ZIP)
+        async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+            
+            const contentLength = response.headers.get('content-length');
+            if (!contentLength) {
+                // Se il server non fornisce il peso, scarichiamo alla cieca e mettiamo in cache
+                const cache = await caches.open(cacheName);
+                await cache.put(url, response.clone());
+                return;
+            }
+
+            const total = parseInt(contentLength, 10);
+            let loaded = 0;
+
+            const reader = response.body.getReader();
+            const stream = new ReadableStream({
+                start(controller) {
+                    function push() {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                controller.close();
+                                return;
+                            }
+                            loaded += value.byteLength;
+                            
+                            // Calcolo per la barra (es. dal 10% all'80%)
+                            const progress = loaded / total;
+                            const currentPct = startPct + (progress * (endPct - startPct));
+                            
+                            const mbLoaded = (loaded / (1024*1024)).toFixed(1);
+                            const mbTotal = (total / (1024*1024)).toFixed(1);
+                            
+                            progressText.textContent = `Download ${itemName} (${mbLoaded} MB / ${mbTotal} MB)...`;
+                            progressBarFill.style.width = `${currentPct}%`;
+                            
+                            controller.enqueue(value);
+                            push();
+                        }).catch(err => {
+                            console.error("Errore stream", err);
+                            controller.error(err);
+                        });
+                    }
+                    push();
+                }
+            });
+
+            const newResponse = new Response(stream, {
+                headers: response.headers,
+                status: response.status,
+                statusText: response.statusText
+            });
+
+            const cache = await caches.open(cacheName);
+            await cache.put(url, newResponse);
+        }
+
+        // FUNZIONE: Fetch silenziosa senza misurazione (Motore JS)
+        async function downloadWithoutProgress(url, cacheName) {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+            const cache = await caches.open(cacheName);
+            await cache.put(url, response.clone());
+        }
+
 
         // --- 2. MOTORE VOSK OFFLINE ---
         let voskModel = null;
@@ -124,9 +278,9 @@
         async function initVoskModel() {
             if (voskModel) return true;
             try {
-                showVoskStatus('Download modello lingua (solo prima volta)...');
-                const modelUrl = 'https://models.alphacephei.com/vosk-model-small-it-0.4.zip';
-                voskModel = await window.Vosk.createModel(modelUrl);
+                showVoskStatus('Inizializzazione Motore AI Offline...');
+                // Ora il motore caricherà ISTANTANEAMENTE il modello dalla Cache che abbiamo forzato!
+                voskModel = await window.Vosk.createModel(MODEL_URL);
                 return true;
             } catch (err) {
                 console.error("Errore caricamento modello Vosk:", err);
@@ -150,16 +304,13 @@
             try {
                 showVoskStatus('Richiesta microfono...');
                 
-                // Tenta l'accesso al microfono
                 mediaStream = await navigator.mediaDevices.getUserMedia({
                     video: false,
                     audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 }
                 });
 
-                // Se riesce, nasconde immediatamente l'overlay qualora fosse aperto
                 gestureOverlay.style.display = 'none';
 
-                // Inizializza l'AudioContext (Forzando il resume per Safari/iOS/Android restrizioni)
                 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
                 audioContext = new AudioContextClass();
                 if (audioContext.state === 'suspended') {
@@ -197,12 +348,10 @@
             } catch (err) {
                 console.error("Errore avvio microfono (Blocco di Sicurezza):", err);
                 
-                // Se il browser ha bloccato in background, chiamiamo in soccorso l'utente
                 if (!isDirectGesture) {
                     hideVoskStatus();
-                    gestureOverlay.style.display = 'flex'; // Mostra il tastone
+                    gestureOverlay.style.display = 'flex'; 
                 } else {
-                    // Se fallisce anche col tocco diretto, è un problema hardware o permessi revocati
                     gestureOverlay.style.display = 'none';
                     showVoskStatus('Permesso Microfono Negato dal Sistema.');
                     setTimeout(hideVoskStatus, 3000);
@@ -228,13 +377,13 @@
         // --- GESTIONE EVENTI OVERLAY ---
         document.getElementById('vosk-gesture-btn').addEventListener('click', () => {
             if (currentTargetInputId) {
-                startVoskListening(currentTargetInputId, true); // true = è un tocco fisico!
+                startVoskListening(currentTargetInputId, true);
             }
         });
 
         document.getElementById('vosk-gesture-cancel').addEventListener('click', () => {
             gestureOverlay.style.display = 'none';
-            sendVoskStopped(); // Spegne il pallino rosso sul gestionale
+            sendVoskStopped(); 
         });
 
         // --- 3. IL RICEVITORE DAL GESTIONALE ---
