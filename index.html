@@ -18,104 +18,17 @@
             box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; font-weight: bold; font-size: 16px;
             cursor: pointer; border: 2px solid white; white-space: nowrap;
         }
-
-        /* Barra di Progresso (STESSO DESIGN DEL PULSANTE) */
-        #progress-container {
-            display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: #1e3a8a; 
-            color: white; border-radius: 50px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3); z-index: 9999; 
-            width: 85%; max-width: 350px; border: 2px solid white;
-            overflow: hidden; 
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        
-        #progress-container.ready-to-install {
-            cursor: pointer;
-            box-shadow: 0 0 15px rgba(59, 130, 246, 0.8);
-            transform: translateX(-50%) scale(1.02);
-        }
-        #progress-container.ready-to-install:active {
-            transform: translateX(-50%) scale(0.98);
-        }
-        
-        #progress-bar-fill {
-            position: absolute; top: 0; left: 0; height: 100%; width: 0%; 
-            background: #3b82f6; 
-            transition: width 0.2s ease-out, background-color 0.3s; z-index: 1;
-        }
-
-        .pulse-install { animation: install-pulse 1.5s infinite alternate; }
-        @keyframes install-pulse { 0% { opacity: 0.7; } 100% { opacity: 1; } }
-        
-        #progress-content {
-            position: relative; z-index: 2; padding: 14px 28px; text-align: center; 
-            font-weight: bold; font-size: 14px; white-space: nowrap;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-        }
-        
-        /* Banner di stato per Vosk */
-        #vosk-status {
-            display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-            background: #333; color: white; padding: 8px 16px; border-radius: 20px;
-            font-size: 13px; z-index: 10000; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            align-items: center; gap: 8px; font-weight: bold; text-align: center;
-        }
-        .pulse-dot { width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-
-        /* BYPASS DI SICUREZZA ANDROID: Overlay per Tocco Diretto */
-        #vosk-gesture-overlay {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85); z-index: 100000;
-            flex-direction: column; align-items: center; justify-content: center; color: white;
-            backdrop-filter: blur(3px);
-        }
-        .gesture-btn {
-            background: #ef4444; border: 4px solid white; border-radius: 50%;
-            width: 100px; height: 100px; font-size: 40px; display: flex;
-            align-items: center; justify-content: center; margin-bottom: 20px;
-            animation: pulse 1.5s infinite; cursor: pointer; box-shadow: 0 10px 25px rgba(239, 68, 68, 0.5);
-        }
     </style>
-    
-    <!-- Importiamo la libreria ufficiale di Vosk per il Browser -->
-    <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
 </head>
 <body>
-    <!-- Overlay Bypass Sicurezza (Paracadute Timeout) -->
-    <div id="vosk-gesture-overlay">
-        <div class="gesture-btn" id="vosk-gesture-btn">🎤</div>
-        <h2 style="margin:0; text-align:center;">Tocca per Sbloccare</h2>
-        <p style="color: #ccc; text-align: center; padding: 0 30px; font-size:14px; margin-top:10px;">
-            Il sistema ha bloccato il microfono in background.<br>Tocca l'icona per autorizzarlo manualmente.
-        </p>
-        <button id="vosk-gesture-cancel" style="margin-top:40px; padding:12px 25px; background:#444; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">Annulla</button>
-    </div>
-
-    <!-- Popup di stato di Vosk -->
-    <div id="vosk-status"><span class="pulse-dot" id="vosk-dot"></span><span id="vosk-msg">Inizializzazione Motore...</span></div>
-
     <!-- Il tuo gestionale App Script -->
     <iframe id="gas-frame" src="https://script.google.com/macros/s/AKfycbyQ9vr71henXHbr6QXDlE9N-We26aoAodf6mm_Rsue9dQVbPBEfjbAlIQ2J8FYdqMDTmA/exec" allow="microphone"></iframe>
 
     <!-- Elementi di Installazione -->
     <div id="install-banner">📱 Installa l'App sul Telefono</div>
-    
-    <!-- Barra di Download Intelligente -->
-    <div id="progress-container">
-        <div id="progress-bar-fill"></div>
-        <div id="progress-content">Preparazione download AI...</div>
-    </div>
 
     <script>
-        // COSTANTI DEI FILE
-        const VOSK_CACHE_NAME = 'vosk-cache-v1';
-        
-        const MODEL_URL = './vosk-model-small-it-0.22.tar.gz';
-        const JS_ENGINE_URL = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js';
-
-        // --- 1. REGISTRAZIONE SW E LOGICA DI INSTALLAZIONE ---
+        // --- REGISTRAZIONE SW E LOGICA DI INSTALLAZIONE ---
         if ('serviceWorker' in navigator) {
             const isSupportedProtocol = window.location.protocol === 'http:' || window.location.protocol === 'https:';
             if (isSupportedProtocol) {
@@ -127,9 +40,6 @@
 
         let deferredPrompt;
         const installBanner = document.getElementById('install-banner');
-        const progressContainer = document.getElementById('progress-container');
-        const progressContent = document.getElementById('progress-content');
-        const progressBarFill = document.getElementById('progress-bar-fill');
 
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault(); 
@@ -138,379 +48,31 @@
         });
 
         installBanner.addEventListener('click', async () => {
-            installBanner.style.display = 'none';
-            progressContainer.style.display = 'block';
-            progressContainer.classList.remove('ready-to-install'); 
-            progressContainer.onclick = null; 
-            progressBarFill.classList.remove('pulse-install');
-            progressBarFill.style.background = '#3b82f6';
-            progressBarFill.style.width = '5%';
-
-            try {
-                progressContent.textContent = "Autorizza il microfono per l'uso offline...";
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(track => track.stop());
-            } catch (err) {
-                console.warn("Permesso microfono negato in fase di installazione:", err);
-            }
-
-            try {
-                progressContent.textContent = "Verifica requisiti offline...";
-                progressBarFill.style.width = '10%';
-
-                await downloadWithProgress(MODEL_URL, VOSK_CACHE_NAME, "Modello AI", 10, 80);
-                
-                progressContent.textContent = "Download Motore Vocale JS...";
-                progressBarFill.style.width = '90%';
-                await downloadWithoutProgress(JS_ENGINE_URL, VOSK_CACHE_NAME);
-
-                setupFinalInstallStep(true);
-
-            } catch (err) {
-                console.error("Download forzato fallito:", err);
-                progressBarFill.style.background = "#f59e0b"; 
-                progressBarFill.style.width = '100%';
-                setupFinalInstallStep(false);
-            }
-        });
-
-        function setupFinalInstallStep(isSuccess) {
-            progressContent.innerHTML = isSuccess ? "🚀 TOCCA QUI PER INSTALLARE" : "⚠️ IGNORA E INSTALLA";
-            progressContainer.classList.add('ready-to-install');
+            if (!deferredPrompt) return;
             
-            progressContainer.onclick = () => {
-                if (!deferredPrompt) return; 
+            // Nascondiamo il banner e facciamo apparire subito il prompt nativo
+            installBanner.style.display = 'none';
+            
+            try {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                console.log('Risultato installazione utente:', outcome);
                 
-                progressContainer.classList.remove('ready-to-install');
-                progressContainer.onclick = null;
-
-                progressContent.textContent = "Installazione in corso...";
-                progressBarFill.style.background = "#10b981"; 
-                progressBarFill.classList.add('pulse-install'); 
-
-                setTimeout(async () => {
-                    try {
-                        deferredPrompt.prompt();
-                        const { outcome } = await deferredPrompt.userChoice;
-                        console.log('Risultato installazione utente:', outcome);
-                        
-                        if (outcome !== 'accepted') {
-                            progressContainer.style.display = 'none';
-                            installBanner.style.display = 'flex'; 
-                        }
-                    } catch (e) {
-                        console.error("Prompt error:", e);
-                    }
-                    deferredPrompt = null;
-                }, 100);
-            };
-        }
+                // Se l'utente annulla, facciamo riapparire il banner
+                if (outcome !== 'accepted') {
+                    installBanner.style.display = 'flex'; 
+                }
+            } catch (e) {
+                console.error("Prompt error:", e);
+                installBanner.style.display = 'flex'; 
+            }
+            deferredPrompt = null;
+        });
 
         window.addEventListener('appinstalled', () => { 
             installBanner.style.display = 'none'; 
-            
-            progressContent.textContent = "Installazione in corso...";
-            progressBarFill.style.background = "#10b981"; 
-            progressBarFill.classList.add('pulse-install');
-            
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-            }, 30000); 
-            
             deferredPrompt = null; 
             console.log("Installazione Android confermata. PWA attiva.");
-        });
-
-        async function downloadWithProgress(url, cacheName, itemName, startPct, endPct) {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`Codice errore server: ${response.status}`);
-            
-            const responseClone = response.clone();
-            caches.open(cacheName).then(cache => cache.put(url, responseClone));
-
-            const contentLength = response.headers.get('content-length');
-            const total = contentLength ? parseInt(contentLength, 10) : 45000000; 
-            
-            if (!response.body) {
-                progressBarFill.style.width = `${endPct}%`;
-                return;
-            }
-
-            let loaded = 0;
-            const reader = response.body.getReader();
-            
-            while(true) {
-                const {done, value} = await reader.read();
-                if (done) break;
-                
-                loaded += value.byteLength;
-                let progress = loaded / total;
-                if (progress > 1) progress = 1; 
-                
-                const currentPct = startPct + (progress * (endPct - startPct));
-                const mbLoaded = (loaded / (1024*1024)).toFixed(1);
-                const mbTotal = (total / (1024*1024)).toFixed(1);
-                
-                progressContent.textContent = `${itemName} (${mbLoaded} / ${mbTotal} MB)...`;
-                progressBarFill.style.width = `${currentPct}%`;
-            }
-        }
-
-        async function downloadWithoutProgress(url, cacheName) {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`Errore JS: ${response.status}`);
-            const cache = await caches.open(cacheName);
-            await cache.put(url, response);
-        }
-
-        // --- 2. MOTORE VOSK OFFLINE ---
-        let voskModel = null;
-        let recognizer = null;
-        let audioContext = null;
-        let mediaStream = null;
-        let source = null;
-        let processor = null;
-        
-        let currentTargetInputId = null; 
-        let isListening = false;
-        let isNetworkOverride = false; 
-
-        const statusUI = document.getElementById('vosk-status');
-        const statusMsg = document.getElementById('vosk-msg');
-        const statusDot = document.getElementById('vosk-dot');
-        const gestureOverlay = document.getElementById('vosk-gesture-overlay');
-
-        function showVoskStatus(msg, isRecording = false) {
-            statusUI.style.display = 'flex';
-            statusMsg.textContent = msg;
-            statusDot.style.backgroundColor = isRecording ? '#ef4444' : (msg.includes('✅') || msg.includes('🌐') ? '#10b981' : '#f59e0b');
-            statusDot.style.animation = isRecording ? 'pulse 1.5s infinite' : 'none';
-        }
-
-        function hideVoskStatus() {
-            statusUI.style.display = 'none';
-        }
-
-        function sendVoskStopped() {
-            const iframe = document.getElementById('gas-frame');
-            if (iframe && iframe.contentWindow) {
-                iframe.contentWindow.postMessage({
-                    type: 'VOSK_STOPPED',
-                    targetId: currentTargetInputId
-                }, '*');
-            }
-        }
-
-        async function initVoskModel() {
-            if (voskModel) return true;
-            let progressInterval;
-            
-            try {
-                isNetworkOverride = false;
-
-                showVoskStatus('Inizializzazione Modello in corso...');
-                
-                let fakeProgress = 0;
-                progressInterval = setInterval(() => {
-                    if (isNetworkOverride) {
-                        clearInterval(progressInterval);
-                        return; 
-                    }
-                    // Rallentiamo l'avanzamento finto per dare tempo ai device più vecchi
-                    if (fakeProgress < 99) fakeProgress += Math.floor(Math.random() * 5) + 1;
-                    if (fakeProgress > 99) fakeProgress = 99;
-                    showVoskStatus(`Decompressione Motore: ${fakeProgress}%...`);
-                }, 500);
-
-                // RIMOSSO IL BLOB INJECTION CHE RADDOPPIAVA LA RAM. 
-                // Passiamo l'URL puro. Vosk scaricherà in streaming (Chunks) mantenendo bassa la RAM.
-                const modelPromise = window.Vosk.createModel(MODEL_URL);
-                
-                // Estendiamo il Timeout a 120 Secondi (Certi smartphone medio gamma ci mettono tanto a estrarre in WASM)
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly (120s)")), 120000));
-                
-                voskModel = await Promise.race([modelPromise, timeoutPromise]);
-                
-                clearInterval(progressInterval); 
-
-                if (isNetworkOverride) {
-                    try { 
-                        if (typeof voskModel.terminate === 'function') voskModel.terminate();
-                        else if (typeof voskModel.delete === 'function') voskModel.delete();
-                    } catch(e) {}
-                    voskModel = null;
-                    return false;
-                }
-
-                showVoskStatus('✅ Motore Vocale Offline Pronto all\'uso!', false);
-                setTimeout(hideVoskStatus, 3500);
-                return true;
-            } catch (err) {
-                if (progressInterval) clearInterval(progressInterval);
-                
-                console.error("Errore caricamento modello Vosk:", err);
-                
-                if (!isNetworkOverride) {
-                    // Fallback Graceful in caso di limite hardware
-                    showVoskStatus('Limiti Hardware. Usa la tastiera o torna online.');
-                    setTimeout(hideVoskStatus, 5000);
-                }
-                return false;
-            }
-        }
-
-        // --- 3. SMART NETWORK MANAGER (PRE-LOADER & GARBAGE COLLECTOR) ---
-        let networkDebounceTimer = null;
-
-        window.addEventListener('offline', () => {
-            clearTimeout(networkDebounceTimer);
-            isNetworkOverride = false;
-            networkDebounceTimer = setTimeout(async () => {
-                if (voskModel || isListening) return; 
-                console.log("Rete persa stabilmente. Pre-caricamento modello Vosk in RAM...");
-                await initVoskModel();
-            }, 3000); 
-        });
-
-        window.addEventListener('online', () => {
-            clearTimeout(networkDebounceTimer);
-            networkDebounceTimer = setTimeout(() => {
-                isNetworkOverride = true; 
-                
-                if (isListening) stopVoskListening(); 
-                
-                if (voskModel) {
-                    console.log("Rete ripristinata stabilmente. Distruzione modello Vosk per liberare RAM...");
-                    try {
-                        if (typeof voskModel.terminate === 'function') voskModel.terminate();
-                        else if (typeof voskModel.delete === 'function') voskModel.delete();
-                    } catch(e) { console.warn("Errore durante la distruzione del modello:", e); }
-                    voskModel = null;
-                }
-                
-                showVoskStatus('🌐 Rete ripristinata. Memoria IA liberata.');
-                setTimeout(hideVoskStatus, 3500);
-            }, 3000);
-        });
-
-        // Funzione Principale di Avvio
-        async function startVoskListening(targetId, isDirectGesture = false) {
-            if (isListening) return;
-            currentTargetInputId = targetId;
-            
-            const modelLoaded = await initVoskModel();
-            if (!modelLoaded || isNetworkOverride) {
-                sendVoskStopped();
-                return;
-            }
-
-            let micReady = false;
-            let safetyTimeout = setTimeout(() => {
-                if (!micReady) {
-                    console.warn("Timeout Sicurezza: Il browser non ha risposto. Forza sblocco manuale.");
-                    hideVoskStatus();
-                    gestureOverlay.style.display = 'flex';
-                }
-            }, 1500); 
-
-            try {
-                showVoskStatus('Richiesta microfono...');
-                
-                mediaStream = await navigator.mediaDevices.getUserMedia({
-                    video: false,
-                    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 }
-                });
-
-                micReady = true;
-                clearTimeout(safetyTimeout);
-                gestureOverlay.style.display = 'none';
-
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                audioContext = new AudioContextClass();
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-
-                source = audioContext.createMediaStreamSource(mediaStream);
-                recognizer = new voskModel.KaldiRecognizer(audioContext.sampleRate);
-                
-                recognizer.on("result", (message) => {
-                    const text = message.result.text;
-                    if (text && text.trim().length > 0) {
-                        document.getElementById('gas-frame').contentWindow.postMessage({
-                            type: 'VOSK_RESULT',
-                            text: text,
-                            targetId: currentTargetInputId
-                        }, '*');
-                        stopVoskListening(); 
-                    }
-                });
-
-                processor = audioContext.createScriptProcessor(4096, 1, 1);
-                processor.onaudioprocess = (event) => {
-                    try {
-                        if(recognizer) recognizer.acceptWaveform(event.inputBuffer);
-                    } catch (error) { console.error('Audio Process Error', error); }
-                };
-
-                source.connect(processor);
-                processor.connect(audioContext.destination);
-                
-                isListening = true;
-                showVoskStatus('In ascolto offline...', true);
-
-            } catch (err) {
-                micReady = true; 
-                clearTimeout(safetyTimeout);
-                console.error("Errore avvio microfono (Blocco di Sicurezza catchato):", err);
-                
-                if (!isDirectGesture) {
-                    hideVoskStatus();
-                    gestureOverlay.style.display = 'flex'; 
-                } else {
-                    gestureOverlay.style.display = 'none';
-                    showVoskStatus('Permesso Microfono Negato dal Sistema.');
-                    setTimeout(hideVoskStatus, 3000);
-                    sendVoskStopped();
-                }
-            }
-        }
-
-        function stopVoskListening() {
-            if (!isListening) return;
-            isListening = false;
-            
-            if (processor) { processor.disconnect(); processor = null; }
-            if (source) { source.disconnect(); source = null; }
-            if (mediaStream) { mediaStream.getTracks().forEach(track => track.stop()); mediaStream = null; }
-            if (audioContext && audioContext.state !== 'closed') { audioContext.close(); audioContext = null; }
-            if (recognizer) { recognizer.remove(); recognizer = null; }
-            
-            hideVoskStatus();
-            sendVoskStopped();
-        }
-
-        // --- GESTIONE EVENTI OVERLAY ---
-        document.getElementById('vosk-gesture-btn').addEventListener('click', () => {
-            if (currentTargetInputId) {
-                startVoskListening(currentTargetInputId, true); 
-            }
-        });
-
-        document.getElementById('vosk-gesture-cancel').addEventListener('click', () => {
-            gestureOverlay.style.display = 'none';
-            sendVoskStopped(); 
-        });
-
-        // --- RICEVITORE DAL GESTIONALE ---
-        window.addEventListener('message', (event) => {
-            if (!event.data || !event.data.action) return;
-            if (event.data.action === 'START_VOSK') {
-                startVoskListening(event.data.targetId, false);
-            } 
-            else if (event.data.action === 'STOP_VOSK') {
-                stopVoskListening();
-            }
         });
     </script>
 </body>
