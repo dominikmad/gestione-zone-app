@@ -146,7 +146,6 @@
             progressBarFill.style.background = '#3b82f6';
             progressBarFill.style.width = '5%';
 
-            // FASE 1: RICHIESTA PERMESSI MICROFONO PRE-DOWNLOAD
             try {
                 progressContent.textContent = "Autorizza il microfono per l'uso offline...";
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -155,7 +154,6 @@
                 console.warn("Permesso microfono negato in fase di installazione:", err);
             }
 
-            // FASE 2: DOWNLOAD DEI FILE AI
             try {
                 progressContent.textContent = "Verifica requisiti offline...";
                 progressBarFill.style.width = '10%';
@@ -215,7 +213,6 @@
             progressBarFill.style.background = "#10b981"; 
             progressBarFill.classList.add('pulse-install');
             
-            // Timeout portato a 30 secondi
             setTimeout(() => {
                 progressContainer.style.display = 'none';
             }, 30000); 
@@ -307,23 +304,11 @@
         async function initVoskModel() {
             if (voskModel) return true;
             let progressInterval;
-            let blobUrl = null; // Tracciamo il Blob per la pulizia della RAM
             
             try {
                 isNetworkOverride = false;
 
-                // ---------------------------------------------------------
-                // BYPASS ARCHITETTURALE: FETCH MANUALE IN RAM (BLOB INJECTION)
-                // ---------------------------------------------------------
-                showVoskStatus('Caricamento pacchetto IA in RAM...');
-                
-                // Effettuiamo la lettura file a mano dal Main Thread (Bypassa il deadlock del Worker)
-                const fileResponse = await fetch(MODEL_URL);
-                if (!fileResponse.ok) throw new Error("Pacchetto .tar.gz non trovato o irraggiungibile.");
-                
-                // Creiamo l'oggetto di Memoria Pura
-                const blob = await fileResponse.blob();
-                blobUrl = URL.createObjectURL(blob); 
+                showVoskStatus('Inizializzazione Modello in corso...');
                 
                 let fakeProgress = 0;
                 progressInterval = setInterval(() => {
@@ -331,19 +316,22 @@
                         clearInterval(progressInterval);
                         return; 
                     }
-                    if (fakeProgress < 99) fakeProgress += Math.floor(Math.random() * 10) + 2;
+                    // Rallentiamo l'avanzamento finto per dare tempo ai device più vecchi
+                    if (fakeProgress < 99) fakeProgress += Math.floor(Math.random() * 5) + 1;
                     if (fakeProgress > 99) fakeProgress = 99;
                     showVoskStatus(`Decompressione Motore: ${fakeProgress}%...`);
-                }, 300);
+                }, 500);
 
-                // Passiamo l'URL della Memoria RAM (blobUrl) a Vosk, NON l'url di rete
-                const modelPromise = window.Vosk.createModel(blobUrl);
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly")), 90000));
+                // RIMOSSO IL BLOB INJECTION CHE RADDOPPIAVA LA RAM. 
+                // Passiamo l'URL puro. Vosk scaricherà in streaming (Chunks) mantenendo bassa la RAM.
+                const modelPromise = window.Vosk.createModel(MODEL_URL);
+                
+                // Estendiamo il Timeout a 120 Secondi (Certi smartphone medio gamma ci mettono tanto a estrarre in WASM)
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly (120s)")), 120000));
                 
                 voskModel = await Promise.race([modelPromise, timeoutPromise]);
                 
                 clearInterval(progressInterval); 
-                if (blobUrl) URL.revokeObjectURL(blobUrl); // Pulizia istantanea per non intasare la RAM
 
                 if (isNetworkOverride) {
                     try { 
@@ -359,14 +347,13 @@
                 return true;
             } catch (err) {
                 if (progressInterval) clearInterval(progressInterval);
-                if (blobUrl) URL.revokeObjectURL(blobUrl); // Pulizia in caso di errore
                 
                 console.error("Errore caricamento modello Vosk:", err);
                 
                 if (!isNetworkOverride) {
-                    const realError = err.message ? err.message : String(err);
-                    showVoskStatus('Errore AI: ' + realError);
-                    setTimeout(hideVoskStatus, 6000);
+                    // Fallback Graceful in caso di limite hardware
+                    showVoskStatus('Limiti Hardware. Usa la tastiera o torna online.');
+                    setTimeout(hideVoskStatus, 5000);
                 }
                 return false;
             }
