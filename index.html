@@ -181,30 +181,35 @@
             progressContent.innerHTML = isSuccess ? "🚀 TOCCA QUI PER INSTALLARE" : "⚠️ IGNORA E INSTALLA";
             progressContainer.classList.add('ready-to-install');
             
-            progressContainer.onclick = async () => {
+            progressContainer.onclick = () => {
                 if (!deferredPrompt) return; 
                 
                 progressContainer.classList.remove('ready-to-install');
                 progressContainer.onclick = null;
 
-                try {
-                    deferredPrompt.prompt();
-                    
-                    progressContent.textContent = "🔄 Installazione nel sistema in corso...";
-                    progressBarFill.style.background = "#10b981"; 
-                    progressBarFill.classList.add('pulse-install'); 
+                // 1. Applica le modifiche in memoria PRIMA
+                progressContent.textContent = "🔄 Installazione nel sistema in corso...";
+                progressBarFill.style.background = "#10b981"; 
+                progressBarFill.classList.add('pulse-install'); 
 
-                    const { outcome } = await deferredPrompt.userChoice;
-                    console.log('Risultato installazione utente:', outcome);
-                    
-                    if (outcome !== 'accepted') {
-                        progressContainer.style.display = 'none';
-                        installBanner.style.display = 'flex'; 
+                // 2. Cede il controllo al browser (DOM Repaint Block Fix) per 100ms 
+                // permettendo di "disegnare" l'aggiornamento visivo prima del blocco sincrono di Android.
+                setTimeout(async () => {
+                    try {
+                        deferredPrompt.prompt();
+                        
+                        const { outcome } = await deferredPrompt.userChoice;
+                        console.log('Risultato installazione utente:', outcome);
+                        
+                        if (outcome !== 'accepted') {
+                            progressContainer.style.display = 'none';
+                            installBanner.style.display = 'flex'; 
+                        }
+                    } catch (e) {
+                        console.error("Prompt error:", e);
                     }
-                } catch (e) {
-                    console.error("Prompt error:", e);
-                }
-                deferredPrompt = null;
+                    deferredPrompt = null;
+                }, 100);
             };
         }
 
@@ -297,21 +302,33 @@
 
         async function initVoskModel() {
             if (voskModel) return true;
+            let progressInterval;
             try {
                 isNetworkOverride = false;
                 let fakeProgress = 0;
                 
-                // Generatore di avanzamento fittizio per rassicurare l'utente durante l'allocazione RAM
-                const progressInterval = setInterval(() => {
+                // Generatore di avanzamento fittizio con Watchdog di rete interno
+                progressInterval = setInterval(() => {
+                    if (isNetworkOverride) {
+                        clearInterval(progressInterval);
+                        return; // Se è tornata la rete, ferma l'intervallo silenziosamente
+                    }
                     if (fakeProgress < 99) fakeProgress += Math.floor(Math.random() * 10) + 2;
                     if (fakeProgress > 99) fakeProgress = 99;
-                    if (!isNetworkOverride) showVoskStatus(`Preparazione IA Offline: ${fakeProgress}%...`);
+                    showVoskStatus(`Preparazione IA Offline: ${fakeProgress}%...`);
                 }, 300);
 
-                voskModel = await window.Vosk.createModel(MODEL_URL);
-                clearInterval(progressInterval);
+                // GARA A TEMPO (Timeout Sicurezza RAM Mobile):
+                // I browser mobile possono "congelare" WebAssembly senza lanciare errori
+                // Se la decompressione non finisce entro 25 secondi, sblocchiamo forzatamente.
+                const modelPromise = window.Vosk.createModel(MODEL_URL);
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout Allocazione RAM WebAssembly")), 25000));
+                
+                voskModel = await Promise.race([modelPromise, timeoutPromise]);
+                
+                clearInterval(progressInterval); // Fermiamo il finto caricamento
 
-                // Se la rete è tornata mentre si stava caricando, annulliamo il successo visivo
+                // Se la rete è tornata mentre il telefono stava decomprimendo...
                 if (isNetworkOverride) {
                     try { 
                         if (typeof voskModel.terminate === 'function') voskModel.terminate();
@@ -325,10 +342,12 @@
                 setTimeout(hideVoskStatus, 3500);
                 return true;
             } catch (err) {
+                if (progressInterval) clearInterval(progressInterval);
                 console.error("Errore caricamento modello Vosk:", err);
+                
                 if (!isNetworkOverride) {
-                    showVoskStatus('Errore Modello. Controlla lo spazio.');
-                    setTimeout(hideVoskStatus, 3000);
+                    showVoskStatus('Errore Modello. Spazio o RAM insufficienti.');
+                    setTimeout(hideVoskStatus, 4000);
                 }
                 return false;
             }
@@ -352,7 +371,7 @@
             clearTimeout(networkDebounceTimer);
             // Ritardo di 3 secondi per confermare che la rete sia stabile
             networkDebounceTimer = setTimeout(() => {
-                isNetworkOverride = true; // Attiva il kill-switch per interrompere l'init se in corso
+                isNetworkOverride = true; // Kill-switch per interrompere initVoskModel e il suo Intervallo 99%
                 
                 if (isListening) stopVoskListening(); // Ferma eventuali registrazioni in corso
                 
