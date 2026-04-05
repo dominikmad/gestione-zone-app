@@ -9,18 +9,74 @@
     <style>
         body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #f0f2f5; }
         iframe { width: 100%; height: 100%; border: none; display: block; }
+        
+        /* Stile del bottone di installazione fluttuante */
+        #install-banner {
+            display: none; /* Nascosto di default, appare solo se installabile */
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #2563eb;
+            color: white;
+            padding: 14px 28px;
+            border-radius: 50px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            z-index: 9999;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid white;
+            transition: transform 0.2s;
+            white-space: nowrap;
+        }
+        #install-banner:active { transform: translateX(-50%) scale(0.95); }
     </style>
 </head>
 <body>
     <iframe id="gas-frame" src="https://script.google.com/macros/s/AKfycbyQ9vr71henXHbr6QXDlE9N-We26aoAodf6mm_Rsue9dQVbPBEfjbAlIQ2J8FYdqMDTmA/exec" allow="microphone"></iframe>
 
+    <div id="install-banner">📱 Installa l'App sul Telefono</div>
+
     <script>
-        // Registriamo il Service Worker per sbloccare l'installazione su Android
+        // 1. Registriamo il Service Worker per sbloccare l'installazione
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js')
             .then(() => console.log('Service Worker registrato con successo!'))
             .catch(err => console.error('Errore Service Worker:', err));
         }
+
+        // 2. Logica di Installazione PWA
+        let deferredPrompt;
+        const installBanner = document.getElementById('install-banner');
+
+        // Chrome/Android lancia questo evento se l'app è pronta per essere installata
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault(); // Blocca il mini-banner noioso nativo di Google
+            deferredPrompt = e; // Salva l'evento per usarlo dopo
+            installBanner.style.display = 'flex'; // Mostra il nostro bellissimo bottone gigante!
+        });
+
+        // Quando l'utente clicca il nostro bottone
+        installBanner.addEventListener('click', async () => {
+            installBanner.style.display = 'none'; // Nascondi il bottone
+            if (deferredPrompt) {
+                deferredPrompt.prompt(); // Mostra il popup di sistema Android per installare
+                const { outcome } = await deferredPrompt.userChoice;
+                console.log('Risultato installazione:', outcome);
+                deferredPrompt = null;
+            }
+        });
+
+        // Se l'installazione va a buon fine, puliamo tutto
+        window.addEventListener('appinstalled', () => {
+            installBanner.style.display = 'none';
+            deferredPrompt = null;
+            console.log('PWA installata con successo!');
+        });
     </script>
 </body>
 </html>
