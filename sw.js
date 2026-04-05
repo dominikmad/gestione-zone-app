@@ -1,5 +1,5 @@
-const APP_CACHE = 'zone-app-v2';
-const MODEL_CACHE = 'vosk-model-cache-v1';
+const APP_CACHE = 'zone-app-v3';
+const VOSK_CACHE = 'vosk-cache-v1';
 
 // I file base del nostro Guscio
 const urlsToCache = [
@@ -18,13 +18,13 @@ self.addEventListener('install', (event) => {
     self.skipWaiting();
 });
 
-// FASE 2: Attivazione (Pulizia vecchie cache)
+// FASE 2: Attivazione (Pulizia vecchie cache per evitare conflitti)
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (cacheName !== APP_CACHE && cacheName !== MODEL_CACHE) {
+                    if (cacheName !== APP_CACHE && cacheName !== VOSK_CACHE) {
                         return caches.delete(cacheName);
                     }
                 })
@@ -38,21 +38,24 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     const requestUrl = event.request.url;
 
-    // SE STIAMO SCARICANDO IL MODELLO VOSK (Il file .zip)
-    if (requestUrl.includes('vosk-model-small-it') || requestUrl.endsWith('.zip') || requestUrl.endsWith('.tar.gz')) {
+    // SE STIAMO SCARICANDO RISORSE VOSK (Il Motore JS o il Modello ZIP)
+    if (requestUrl.includes('vosk.js') || requestUrl.includes('vosk-model-small-it') || requestUrl.endsWith('.zip') || requestUrl.endsWith('.tar.gz')) {
         event.respondWith(
-            caches.open(MODEL_CACHE).then((cache) => {
+            caches.open(VOSK_CACHE).then((cache) => {
                 return cache.match(event.request).then((response) => {
-                    // 1. Se il modello è già nella memoria del telefono, usalo immediatamente!
+                    // 1. Se la risorsa è già nella memoria del telefono, usala immediatamente!
                     if (response) {
-                        console.log('[SW] Modello Vosk caricato dalla CACHE OFFLINE!');
+                        console.log('[SW] Risorsa Vosk caricata dalla CACHE OFFLINE:', requestUrl);
                         return response;
                     }
-                    // 2. Altrimenti, scaricalo da internet e poi salvalo per sempre nella cache
-                    console.log('[SW] Download modello Vosk in corso... (solo la prima volta)');
+                    // 2. Altrimenti, scaricala da internet e poi salvala per sempre nella cache
+                    console.log('[SW] Download risorsa Vosk in corso... (solo la prima volta):', requestUrl);
                     return fetch(event.request).then((networkResponse) => {
                         cache.put(event.request, networkResponse.clone());
                         return networkResponse;
+                    }).catch(err => {
+                        console.error('[SW] Impossibile scaricare la risorsa Vosk. Sei offline e non è in cache.', err);
+                        throw err;
                     });
                 });
             })
@@ -60,10 +63,19 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // COMPORTAMENTO STANDARD PER TUTTI GLI ALTRI FILE
+    // COMPORTAMENTO STANDARD PER TUTTI GLI ALTRI FILE (Il Guscio HTML)
     event.respondWith(
         caches.match(event.request).then((response) => {
-            return response || fetch(event.request);
+            return response || fetch(event.request).then((fetchRes) => {
+                // Aggiorna dinamicamente la cache base
+                return caches.open(APP_CACHE).then((cache) => {
+                    // Non cachiamo le chiamate API di Google Script (POST, ecc.)
+                    if (event.request.method === 'GET' && requestUrl.startsWith('http')) {
+                        cache.put(event.request, fetchRes.clone());
+                    }
+                    return fetchRes;
+                });
+            });
         }).catch(() => {
             // Fallback se manca rete e il file non è in cache
             return new Response('Sei offline e la risorsa non è in cache.');
