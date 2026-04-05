@@ -73,7 +73,7 @@
             display: none; position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
             background: #333; color: white; padding: 8px 16px; border-radius: 20px;
             font-size: 13px; z-index: 10000; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            align-items: center; gap: 8px; font-weight: bold;
+            align-items: center; gap: 8px; font-weight: bold; text-align: center;
         }
         .pulse-dot { width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
@@ -325,7 +325,7 @@
         function showVoskStatus(msg, isRecording = false) {
             statusUI.style.display = 'flex';
             statusMsg.textContent = msg;
-            statusDot.style.backgroundColor = isRecording ? '#ef4444' : '#f59e0b';
+            statusDot.style.backgroundColor = isRecording ? '#ef4444' : (msg.includes('✅') || msg.includes('🌐') ? '#10b981' : '#f59e0b');
             statusDot.style.animation = isRecording ? 'pulse 1.5s infinite' : 'none';
         }
 
@@ -334,31 +334,74 @@
         }
 
         function sendVoskStopped() {
-            document.getElementById('gas-frame').contentWindow.postMessage({
-                type: 'VOSK_STOPPED',
-                targetId: currentTargetInputId
-            }, '*');
+            const iframe = document.getElementById('gas-frame');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage({
+                    type: 'VOSK_STOPPED',
+                    targetId: currentTargetInputId
+                }, '*');
+            }
         }
 
         async function initVoskModel() {
             if (voskModel) return true;
             try {
-                showVoskStatus('Inizializzazione Motore AI Offline...');
+                showVoskStatus('Preparazione IA Offline (Gestione RAM)...');
                 voskModel = await window.Vosk.createModel(MODEL_URL);
                 return true;
             } catch (err) {
                 console.error("Errore caricamento modello Vosk:", err);
-                showVoskStatus('Errore Modello. Riprova con rete.');
+                showVoskStatus('Errore Modello. Controlla lo spazio.');
                 setTimeout(hideVoskStatus, 3000);
                 return false;
             }
         }
+
+        // --- 3. SMART NETWORK MANAGER (PRE-LOADER & GARBAGE COLLECTOR) ---
+        let networkDebounceTimer = null;
+
+        window.addEventListener('offline', () => {
+            clearTimeout(networkDebounceTimer);
+            // Ritardo di 3 secondi per evitare caricamenti continui in caso di segnale instabile
+            networkDebounceTimer = setTimeout(async () => {
+                if (voskModel || isListening) return; // Già caricato
+                console.log("Rete persa stabilmente. Pre-caricamento modello Vosk in RAM...");
+                const loaded = await initVoskModel();
+                if (loaded) {
+                    showVoskStatus('✅ Motore Vocale Offline Pronto all\'uso!');
+                    setTimeout(hideVoskStatus, 3500);
+                }
+            }, 3000); 
+        });
+
+        window.addEventListener('online', () => {
+            clearTimeout(networkDebounceTimer);
+            // Ritardo di 3 secondi per confermare che la rete sia stabile
+            networkDebounceTimer = setTimeout(() => {
+                if (isListening) stopVoskListening(); // Ferma eventuali registrazioni in corso
+                
+                if (voskModel) {
+                    console.log("Rete ripristinata stabilmente. Distruzione modello Vosk per liberare RAM...");
+                    try {
+                        // Il metodo standard per liberare i WebWorkers in vosk-browser
+                        if (typeof voskModel.terminate === 'function') voskModel.terminate();
+                        else if (typeof voskModel.delete === 'function') voskModel.delete();
+                    } catch(e) { console.warn("Errore durante la distruzione del modello:", e); }
+                    
+                    voskModel = null;
+                    showVoskStatus('🌐 Rete ripristinata. Memoria IA liberata.');
+                    setTimeout(hideVoskStatus, 3500);
+                }
+            }, 3000);
+        });
 
         // Funzione Principale di Avvio
         async function startVoskListening(targetId, isDirectGesture = false) {
             if (isListening) return;
             currentTargetInputId = targetId;
             
+            // Se il Network Manager non ha fatto in tempo a caricarlo (es. utente clicca sùbito),
+            // viene caricato ora come paracadute.
             const modelLoaded = await initVoskModel();
             if (!modelLoaded) {
                 sendVoskStopped();
@@ -466,7 +509,7 @@
             sendVoskStopped(); 
         });
 
-        // --- 3. IL RICEVITORE DAL GESTIONALE ---
+        // --- RICEVITORE DAL GESTIONALE ---
         window.addEventListener('message', (event) => {
             if (!event.data || !event.data.action) return;
             if (event.data.action === 'START_VOSK') {
