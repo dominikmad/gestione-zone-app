@@ -1,5 +1,4 @@
-const APP_CACHE = 'zone-app-v4';
-const VOSK_CACHE = 'vosk-cache-v1';
+const APP_CACHE = 'zone-app-v5';
 
 // I file base del nostro Guscio
 const urlsToCache = [
@@ -24,7 +23,8 @@ self.addEventListener('activate', (event) => {
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (cacheName !== APP_CACHE && cacheName !== VOSK_CACHE) {
+                    // Eliminiamo le vecchie cache, inclusa quella di vosk che si chiamava 'vosk-cache-v1'
+                    if (cacheName !== APP_CACHE) {
                         return caches.delete(cacheName);
                     }
                 })
@@ -34,28 +34,11 @@ self.addEventListener('activate', (event) => {
     self.clients.claim();
 });
 
-// FASE 3: Intercettazione di Rete (La Magia Offline)
+// FASE 3: Intercettazione di Rete (La Magia Offline base)
 self.addEventListener('fetch', (event) => {
     const requestUrl = event.request.url;
 
-    // SE STIAMO CERCANDO RISORSE VOSK (Il Motore JS o il Modello ZIP)
-    if (requestUrl.includes('vosk.js') || requestUrl.includes('vosk-model-small-it') || requestUrl.endsWith('.zip')) {
-        event.respondWith(
-            caches.match(event.request).then((response) => {
-                // Se c'è in cache (inserito dalla barra di installazione), restituiscilo!
-                if (response) {
-                    console.log('[SW] Risorsa Vosk caricata DALLA CACHE:', requestUrl);
-                    return response;
-                }
-                // Altrimenti lascialo passare su internet normale
-                console.log('[SW] Risorsa Vosk non in cache, procedo con rete:', requestUrl);
-                return fetch(event.request);
-            })
-        );
-        return;
-    }
-
-    // COMPORTAMENTO STANDARD PER TUTTI GLI ALTRI FILE (Il Guscio HTML)
+    // COMPORTAMENTO STANDARD PER TUTTI I FILE (Il Guscio HTML)
     event.respondWith(
         caches.match(event.request).then((response) => {
             return response || fetch(event.request).then((fetchRes) => {
